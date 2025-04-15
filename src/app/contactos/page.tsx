@@ -29,7 +29,10 @@ export default function ContactosPage() {
 
   return (
     <div className="min-h-screen bg-gray-50 p-8">
-      <h1 className="text-2xl font-bold mb-4">Contactos</h1>
+      {/* Encabezado */}
+      <header className="mb-8 text-left">
+        <h1 className="text-3xl font-bold text-gray-800">Contactos</h1>
+      </header>
       {/* Encabezado con Filtro y Buscar en una sola línea */}
       <div className="flex items-center space-x-6 mb-4">
         <div className="flex items-center space-x-2">
@@ -45,14 +48,13 @@ export default function ContactosPage() {
       <div className="overflow-x-auto bg-white p-4 rounded shadow">
         <table className="min-w-full border-collapse">
           <thead>
-            <tr>
+            <tr className="bg-gray-200">
               <th className="px-4 py-2 text-left">Avatar</th>
               <th className="px-4 py-2 text-left">Nombre</th>
               <th className="px-4 py-2 text-left">Teléfono</th>
               <th className="px-4 py-2 text-left">Suscrito</th>
             </tr>
           </thead>
-          {/* Usamos divide-y con un gris muy claro para separar las filas */}
           <tbody className="divide-y divide-gray-200">
             {contacts.map((contact) => (
               <tr key={contact.session_id}>

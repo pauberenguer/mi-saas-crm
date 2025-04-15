@@ -43,7 +43,7 @@ export default function Chat({ contactId }: ChatProps) {
       {
         session_id: contactId,
         message: {
-          type: "member", // Cambia este valor según corresponda: "member", "ai" o "human"
+          type: "member", // Ajusta este valor según corresponda: "member", "ai" o "human"
           content: newMessage,
           additional_kwargs: {},
           response_metadata: {},
@@ -62,25 +62,42 @@ export default function Chat({ contactId }: ChatProps) {
     <div className="flex flex-col h-full">
       <div className="flex-1 overflow-y-auto p-4 mb-4">
         {messages.map((msg) => {
-          // Determinar la alineación: Cliente a la izquierda, Member y AI a la derecha
-          const alignment =
-            msg.message.type === "human" ? "justify-start" : "justify-end";
+          // Determinamos la alineación según el tipo
+          const isCliente = msg.message.type === "human";
+          const isDerecha = !isCliente; // Si es ai o member
 
           return (
-            <div key={msg.id} className={`mb-2 flex ${alignment}`}>
+            <div
+              key={msg.id}
+              className={`mb-2 flex items-center ${isCliente ? "justify-start" : "justify-end"} gap-2`}
+            >
+              {isCliente && (
+                <img
+                  src="/avatar-placeholder.png"
+                  alt="Cliente"
+                  className="w-8 h-8 rounded-full object-cover"
+                />
+              )}
               <div
-                className="inline-block rounded-3xl px-3 py-2 max-w-[80%]"
+                className="inline-block rounded-3xl px-3 py-2 max-w-[80%] break-words"
                 style={getMessageStyle(msg.message.type)}
               >
-                <small className="block text-xs mb-1">
-                  {msg.message.type === "member"
-                    ? "Yo"
-                    : msg.message.type === "ai"
-                    ? "Flowy"
-                    : "Cliente"}
-                </small>
                 <p>{msg.message.content}</p>
               </div>
+              {isDerecha && msg.message.type === "ai" && (
+                <img
+                  src="/flowy.png"
+                  alt="Flowy"
+                  className="w-8 h-8 rounded-full object-cover"
+                />
+              )}
+              {isDerecha && msg.message.type === "member" && (
+                <img
+                  src="/yo.png"
+                  alt="Yo"
+                  className="w-8 h-8 rounded-full object-cover"
+                />
+              )}
             </div>
           );
         })}
