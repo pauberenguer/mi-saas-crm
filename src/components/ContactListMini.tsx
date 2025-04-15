@@ -8,11 +8,11 @@ export interface Contact {
   created_at: string;
 }
 
-interface ContactListProps {
+interface ContactListMiniProps {
   onSelect: (contact: Contact) => void;
 }
 
-export default function ContactList({ onSelect }: ContactListProps) {
+export default function ContactListMini({ onSelect }: ContactListMiniProps) {
   const [contacts, setContacts] = useState<Contact[]>([]);
 
   useEffect(() => {
@@ -31,16 +31,8 @@ export default function ContactList({ onSelect }: ContactListProps) {
   }, []);
 
   return (
-    <div className="overflow-x-auto bg-white p-4 rounded shadow">
-      <table className="min-w-full border-collapse">
-        <thead>
-          <tr className="bg-gray-200">
-            <th className="px-4 py-2 text-left">Avatar</th>
-            <th className="px-4 py-2 text-left">Nombre</th>
-            <th className="px-4 py-2 text-left">Teléfono</th>
-            <th className="px-4 py-2 text-left">Suscrito</th>
-          </tr>
-        </thead>
+    <div className="overflow-y-auto bg-white p-4 rounded shadow h-full">
+      <table className="min-w-full">
         <tbody className="divide-y divide-gray-200">
           {contacts.map((contact) => (
             <tr
@@ -56,10 +48,6 @@ export default function ContactList({ onSelect }: ContactListProps) {
                 />
               </td>
               <td className="px-4 py-2">{contact.name}</td>
-              <td className="px-4 py-2">{contact.session_id}</td>
-              <td className="px-4 py-2">
-                {new Date(contact.created_at).toLocaleDateString()}
-              </td>
             </tr>
           ))}
         </tbody>
