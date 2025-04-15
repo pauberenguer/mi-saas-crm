@@ -1,11 +1,11 @@
-// src/app/contactos/page.tsx
-import Layout from '@/components/Layout';
+"use client";
+import ContactList from "@/components/ContactList";
 
 export default function ContactosPage() {
   return (
-    <Layout>
-      <h1 className="text-2xl font-bold">Contactos</h1>
-      <p>Esta sección se usará para gestionar los contactos.</p>
-    </Layout>
+    <div className="p-8">
+      <h1 className="text-2xl font-bold mb-4">Contactos</h1>
+      <ContactList />
+    </div>
   );
 }

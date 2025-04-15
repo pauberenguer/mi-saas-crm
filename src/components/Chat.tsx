@@ -2,19 +2,15 @@
 import { useState, useEffect } from "react";
 import { supabase } from "@/utils/supabaseClient";
 
-// Forzamos el uso de "34640893030" como session_id, ya que ese es el valor que funciona en Postman.
-const fixedSessionId = "34640893030";
-
-const Chat = () => {
+const Chat = ({ contactId }: { contactId: string }) => {
   const [messages, setMessages] = useState<any[]>([]);
   const [newMessage, setNewMessage] = useState("");
 
-  // Función para obtener las conversaciones iniciales
   const fetchMessages = async () => {
     const { data, error } = await supabase
       .from("conversaciones")
       .select("*")
-      .eq("session_id", fixedSessionId)
+      .eq("session_id", contactId)
       .order("id", { ascending: true });
     if (error) {
       console.error("Error fetching messages:", error);
@@ -24,123 +20,92 @@ const Chat = () => {
   };
 
   useEffect(() => {
+    // Reiniciamos los mensajes cada vez que cambia el contactId
+    setMessages([]);
     fetchMessages();
+
+    // Configuramos una suscripción a cambios en la tabla "conversaciones"
+    // que filtre por el nuevo contactId.
     const channel = supabase
-      .channel("conversaciones-channel")
+      .channel("messages-channel")
       .on(
         "postgres_changes",
         {
           event: "INSERT",
           schema: "public",
           table: "conversaciones",
-          filter: `session_id=eq.${fixedSessionId}`,
+          filter: `session_id=eq.${contactId}`,
         },
         (payload) => {
-          console.log("Payload recibido desde canal:", payload);
-          setMessages((prev) => [...prev, payload.new]);
+          // Cada vez que se inserte un mensaje nuevo, lo agregamos al estado.
+          setMessages((prevMessages) => [...prevMessages, payload.new]);
         }
       )
       .subscribe();
+
+    // Limpieza: removemos la suscripción cuando contactId cambie o el componente se desmonte.
     return () => {
       supabase.removeChannel(channel);
     };
-  }, []);
+  }, [contactId]);
 
-  // Función para generar un id similar al de WhatsApp (opcional)
-  const generateMessageId = () => {
-    return "wamid." + Math.random().toString(36).substring(2, 15);
-  };
-
-  // Función para enviar un mensaje y llamar al webhook de n8n
   const sendMessage = async () => {
     if (newMessage.trim().length === 0) return;
-    console.log("sendMessage iniciado, newMessage:", newMessage);
 
-    // Inserción en Supabase para registrar el mensaje
     const { error } = await supabase.from("conversaciones").insert([
       {
-        session_id: fixedSessionId,
+        session_id: contactId,
         message: {
-          type: "member", // Indica que el mensaje se envía desde el CRM
+          type: "member", // Mensaje enviado desde el CRM (se muestra como "Yo")
           content: newMessage,
           additional_kwargs: {},
           response_metadata: {},
         },
       },
     ]);
+
     if (error) {
       console.error("Error sending message:", error);
-      return;
+    } else {
+      setNewMessage("");
+      // Opcional: Agregar el mensaje enviado al estado para actualizar la vista de inmediato
+      // setMessages((prev) => [...prev, { message: { type: "member", content: newMessage } }]);
+      // O simplemente volver a consultar los mensajes:
+      fetchMessages();
     }
-
-    // Construir el payload EXACTO que usas en Postman
-    const payload = {
-      messaging_product: "whatsapp",
-      contacts: [
-        {
-          input: fixedSessionId,
-          wa_id: fixedSessionId,
-        },
-      ],
-      messages: [
-        {
-          id: generateMessageId(), // Se genera un id similar al de WhatsApp
-        },
-      ],
-    };
-
-    console.log("Payload enviado:", JSON.stringify(payload));
-
-    try {
-      const response = await fetch("https://n8n.asisttente.com/webhook/elglobobot", {
-        method: "POST",
-        mode: "cors", // Forzamos CORS
-        headers: {
-          "Content-Type": "application/json",
-          // Se elimina el header Prefer para que sea idéntico a Postman
-        },
-        body: JSON.stringify(payload),
-      });
-      console.log("Webhook response:", response.status, response.statusText);
-    } catch (err) {
-      console.error("Error calling n8n webhook:", err);
-    }
-    setNewMessage("");
-  };
-
-  // Mapeo para mostrar la etiqueta correcta en la interfaz
-  const labelMapping: Record<string, string> = {
-    member: "Yo",
-    ai: "Flowy",
-    human: "Cliente",
   };
 
   return (
-    <div className="flex flex-col h-full">
-      {/* Panel de Conversaciones */}
+    <div>
+      <h2 className="text-lg mb-4">Conversación con: {contactId}</h2>
       <div className="flex-1 overflow-y-auto p-4 border rounded mb-4">
-        {messages.map((msg) => (
-          <div key={msg.id} className="p-2 border-b">
+        {messages.map((msg, index) => (
+          <div key={index} className="p-2 border-b">
             <small className="block text-xs text-gray-600 mb-1">
-              {labelMapping[msg.message.type] || "Desconocido"}
+              {msg.message.type === "member"
+                ? "Yo"
+                : msg.message.type === "ai"
+                ? "Flowy"
+                : "Cliente"}
             </small>
             {msg.message.content}
           </div>
         ))}
       </div>
-      {/* Entrada de Mensaje */}
       <div className="flex gap-2">
         <input
           type="text"
-          className="flex-1 p-2 border rounded"
-          placeholder="Escribe un mensaje..."
           value={newMessage}
           onChange={(e) => setNewMessage(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter") sendMessage(); }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") sendMessage();
+          }}
+          placeholder="Escribe un mensaje..."
+          className="flex-1 p-2 border rounded"
         />
         <button
-          className="px-4 py-2 bg-blue-500 text-white rounded"
           onClick={sendMessage}
+          className="px-4 py-2 bg-blue-500 text-white rounded"
         >
           Enviar
         </button>
