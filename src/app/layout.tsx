@@ -1,3 +1,4 @@
+// src/app/layout.tsx
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -7,7 +8,8 @@ import { Home, User, Zap, MessageSquare, Settings } from "lucide-react";
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const defaultColor = "#818b9c";
-  const activeColor = "#2acf7e";
+  // Actualizamos el color activo a azul
+  const activeColor = "#0084ff";
 
   return (
     <html lang="es">

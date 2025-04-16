@@ -1,7 +1,8 @@
+// src/app/chat/page.tsx
 "use client";
 
 import { useState, useEffect } from "react";
-import { XCircle, User, Users, List, Phone } from "lucide-react";
+import { XCircle, User, Users, List, Phone, Search } from "lucide-react";
 import ContactListMini, { Contact } from "@/components/ContactListMini";
 import Conversation from "@/components/Conversation";
 import { supabase } from "@/utils/supabaseClient";
@@ -17,16 +18,15 @@ export default function ChatPage() {
   const [activeFilter, setActiveFilter] = useState("No Asignado");
   const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
   const [contactEtiquetas, setContactEtiquetas] = useState<{ [key: string]: string } | null>(null);
-  // Estado para el modo de mensaje (Responder o Nota)
   const [messageMode, setMessageMode] = useState<"Responder" | "Nota">("Responder");
-  // Estado para almacenar las notas (mensajes con type "nota")
   const [notes, setNotes] = useState<any[]>([]);
-  // Estados para el botón de automatización
   const [confirmPause, setConfirmPause] = useState(false);
   const [confirmResume, setConfirmResume] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
 
-  // Al seleccionar un contacto se consulta la columna "etiquetas" y "is_paused" en Supabase
+  // Nuevo estado para el input de búsqueda (solo visual por ahora)
+  const [headerSearch, setHeaderSearch] = useState("");
+
   useEffect(() => {
     const fetchEtiquetas = async () => {
       if (selectedContact) {
@@ -41,7 +41,6 @@ export default function ChatPage() {
         } else {
           setContactEtiquetas(data?.etiquetas || {});
           setIsPaused(data?.is_paused || false);
-          // Reiniciamos los estados de confirmación al cambiar el contacto
           setConfirmPause(false);
           setConfirmResume(false);
         }
@@ -52,7 +51,6 @@ export default function ChatPage() {
     fetchEtiquetas();
   }, [selectedContact]);
 
-  // Obtener notas (mensajes con type "nota") para el contacto seleccionado
   useEffect(() => {
     const fetchNotes = async () => {
       if (selectedContact) {
@@ -75,7 +73,6 @@ export default function ChatPage() {
     fetchNotes();
   }, [selectedContact]);
 
-  // Función para hacer scroll hasta la nota clicada
   function handleNoteClick(note: any) {
     const element = document.getElementById(`note-${note.id}`);
     if (element) {
@@ -83,68 +80,50 @@ export default function ChatPage() {
     }
   }
 
-  // Función para eliminar una nota
   async function deleteNote(noteId: number) {
     const { error } = await supabase.from("conversaciones").delete().eq("id", noteId);
-    if (error) {
-      console.error("Error deleting note:", error);
-    } else {
-      const { data, error: fetchError } = await supabase
+    if (!error) {
+      const { data } = await supabase
         .from("conversaciones")
         .select("*")
         .eq("session_id", selectedContact?.session_id)
         .eq("message->>type", "nota")
         .order("id", { ascending: true });
-      if (fetchError) {
-        console.error("Error fetching notes:", fetchError);
-      } else {
-        setNotes(data || []);
-      }
+      setNotes(data || []);
     }
   }
 
-  // Función para eliminar una etiqueta desde el Perfil
   async function deleteTag(tagKey: string) {
     if (!selectedContact || !contactEtiquetas) return;
-    const updatedEtiquetas = { ...contactEtiquetas };
-    delete updatedEtiquetas[tagKey];
+    const updated = { ...contactEtiquetas };
+    delete updated[tagKey];
     const { error } = await supabase
       .from("contactos")
-      .update({ etiquetas: updatedEtiquetas })
+      .update({ etiquetas: updated })
       .eq("session_id", selectedContact.session_id);
-    if (error) {
-      console.error("Error deleting tag:", error);
-    } else {
-      setContactEtiquetas(updatedEtiquetas);
-    }
+    if (!error) setContactEtiquetas(updated);
   }
 
-  // Función para pausar la automatización: actualiza is_paused a true
   async function pauseAutomation() {
     if (!selectedContact) return;
     const { error } = await supabase
       .from("contactos")
       .update({ is_paused: true })
       .eq("session_id", selectedContact.session_id);
-    if (error) {
-      console.error("Error pausing automation:", error);
-    } else {
+    if (!error) {
       setIsPaused(true);
       setConfirmPause(false);
       setConfirmResume(false);
     }
   }
 
-  // Función para reactivar la automatización: actualiza is_paused a false
   async function resumeAutomation() {
     if (!selectedContact) return;
     const { error } = await supabase
       .from("contactos")
       .update({ is_paused: false })
       .eq("session_id", selectedContact.session_id);
-    if (error) {
-      console.error("Error resuming automation:", error);
-    } else {
+    if (!error) {
       setIsPaused(false);
       setConfirmPause(false);
       setConfirmResume(false);
@@ -153,9 +132,19 @@ export default function ChatPage() {
 
   return (
     <div className="flex flex-col h-full bg-gray-50 p-4">
-      {/* Encabezado de la Página */}
-      <header className="mb-4 text-left">
+      {/* Encabezado de la Página con búsqueda */}
+      <header className="mb-4 flex items-center justify-between">
         <h1 className="text-3xl font-bold text-gray-800">Chat</h1>
+        <div className="flex items-center border border-gray-300 rounded px-3 py-1">
+          <Search size={16} className="text-gray-500" />
+          <input
+            type="text"
+            placeholder="Buscar…"
+            value={headerSearch}
+            onChange={(e) => setHeaderSearch(e.target.value)}
+            className="ml-2 w-48 placeholder-gray-500 focus:outline-none"
+          />
+        </div>
       </header>
 
       <div className="flex flex-1">
@@ -168,7 +157,7 @@ export default function ChatPage() {
                 key={label}
                 onClick={() => setActiveFilter(label)}
                 className={`text-sm font-medium flex items-center space-x-2 ${
-                  activeFilter === label ? "text-green-500" : "text-gray-700"
+                  activeFilter === label ? "text-blue-500" : "text-gray-700"
                 }`}
               >
                 <Icon size={20} />
@@ -178,7 +167,7 @@ export default function ChatPage() {
           </div>
         </div>
 
-        {/* Contenedor para Bloque 2 (Mini Tabla de Contactos) y bloques combinados de Conversación y Perfil */}
+        {/* Contenedor para Bloque 2 (Mini Tabla de Contactos) y contenido */}
         <div className="flex flex-1">
           {/* Bloque 2: Mini Tabla de Contactos */}
           <div className="w-1/4">
@@ -198,7 +187,6 @@ export default function ChatPage() {
               {/* Bloque 3: Área de Conversación */}
               <div className="flex-1">
                 <div className="bg-white shadow rounded p-4 h-full">
-                  {/* Encabezado: Avatar y nombre */}
                   <div className="flex items-center mb-4">
                     <img
                       src="/avatar-placeholder.png"
@@ -209,7 +197,6 @@ export default function ChatPage() {
                       {selectedContact.name}
                     </span>
                   </div>
-                  {/* Componente Conversation */}
                   <Conversation
                     contactId={selectedContact.session_id}
                     messageMode={messageMode}
@@ -224,14 +211,12 @@ export default function ChatPage() {
               {/* Bloque 4: Perfil */}
               <div className="w-1/4">
                 <div className="bg-white shadow rounded p-4 h-full flex flex-col">
-                  {/* Nombre y Avatar */}
                   <h2 className="text-xl font-bold mb-2">{selectedContact.name}</h2>
                   <img
                     src="/avatar-placeholder.png"
                     alt={selectedContact.name}
                     className="w-24 h-24 rounded-full object-cover mb-4"
                   />
-                  {/* Teléfono */}
                   <div className="flex items-center mb-4 space-x-1">
                     <Phone size={16} color="#818b9c" />
                     <span className="text-sm text-gray-700">
@@ -273,7 +258,7 @@ export default function ChatPage() {
                         onClick={() => pauseAutomation()}
                         className="w-full text-sm font-medium py-2 px-4 rounded bg-black text-white hover:bg-gray-800"
                       >
-                        Pausar Automatización
+                        Pausar
                       </button>
                     )}
                   </div>
@@ -299,11 +284,11 @@ export default function ChatPage() {
                           >
                             X
                           </button>
-                          <p className="text-sm text-gray-800">
-                            {note.message.content}
-                          </p>
+                          <p className="text-sm text-gray-800">{note.message.content}</p>
                           <small className="text-xs text-gray-600">
-                            {note.created_at ? new Date(note.created_at).toLocaleString() : ""}
+                            {note.created_at
+                              ? new Date(note.created_at).toLocaleString()
+                              : ""}
                           </small>
                         </div>
                       ))
@@ -318,39 +303,37 @@ export default function ChatPage() {
                     <span className="text-base font-semibold text-gray-800">
                       Etiquetas
                     </span>
-                    <span className="text-base font-semibold" style={{ color: "#4585fb" }}>
+                    <span
+                      className="text-base font-semibold"
+                      style={{ color: "#4585fb" }}
+                    >
                       + Añadir Etiqueta
                     </span>
                   </div>
                   <hr className="w-full border-t border-gray-300 shadow-sm mt-4" />
                   <div className="mt-4 flex flex-wrap gap-2">
-                    {contactEtiquetas && Object.keys(contactEtiquetas).length > 0 ? (
-                      Object.entries(contactEtiquetas).map(([key, value]) =>
-                        value.toString().trim() !== "" ? (
-                          <div key={key} className="relative inline-block">
-                            <span className="px-2 py-1 rounded-full text-sm font-medium bg-[#eff7ff] text-gray-800 border border-[#80c2ff]">
-                              {value}
-                            </span>
-                            <button
-                              onClick={() => deleteTag(key)}
-                              className="absolute -top-1 -right-1 text-black text-xs hover:text-gray-700"
-                            >
-                              X
-                            </button>
-                          </div>
-                        ) : null
-                      )
-                    ) : (
-                      <span className="text-sm text-gray-500">
-                        No hay etiquetas configuradas.
-                      </span>
-                    )}
+                    {contactEtiquetas &&
+                      Object.entries(contactEtiquetas).map(
+                        ([key, value]) =>
+                          value.toString().trim() !== "" && (
+                            <div key={key} className="relative inline-block">
+                              <span className="px-2 py-1 rounded-full text-sm font-medium bg-[#eff7ff] text-gray-800 border border-[#80c2ff]">
+                                {value}
+                              </span>
+                              <button
+                                onClick={() => deleteTag(key)}
+                                className="absolute -top-1 -right-1 text-black text-xs hover:text-gray-700"
+                              >
+                                X
+                              </button>
+                            </div>
+                          )
+                      )}
                   </div>
                 </div>
               </div>
             </>
           ) : (
-            // Bloque combinado (Conversación + Perfil) para cuando no hay contacto seleccionado
             <div className="flex-1">
               <div className="bg-white shadow rounded p-4 h-full flex flex-col items-center justify-center">
                 <img
