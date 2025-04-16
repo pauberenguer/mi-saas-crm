@@ -21,14 +21,18 @@ export default function ChatPage() {
   const [messageMode, setMessageMode] = useState<"Responder" | "Nota">("Responder");
   // Estado para almacenar las notas (mensajes con type "nota")
   const [notes, setNotes] = useState<any[]>([]);
+  // Estados para el botón de automatización
+  const [confirmPause, setConfirmPause] = useState(false);
+  const [confirmResume, setConfirmResume] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
 
-  // Al seleccionar un contacto se consulta la columna "etiquetas" en Supabase
+  // Al seleccionar un contacto se consulta la columna "etiquetas" y "is_paused" en Supabase
   useEffect(() => {
     const fetchEtiquetas = async () => {
       if (selectedContact) {
         const { data, error } = await supabase
           .from("contactos")
-          .select("etiquetas")
+          .select("etiquetas, is_paused")
           .eq("session_id", selectedContact.session_id)
           .single();
         if (error) {
@@ -36,6 +40,10 @@ export default function ChatPage() {
           setContactEtiquetas({});
         } else {
           setContactEtiquetas(data?.etiquetas || {});
+          setIsPaused(data?.is_paused || false);
+          // Reiniciamos los estados de confirmación al cambiar el contacto
+          setConfirmPause(false);
+          setConfirmResume(false);
         }
       } else {
         setContactEtiquetas(null);
@@ -44,7 +52,7 @@ export default function ChatPage() {
     fetchEtiquetas();
   }, [selectedContact]);
 
-  // Obtener notas (mensajes de tipo "nota") para el contacto seleccionado
+  // Obtener notas (mensajes con type "nota") para el contacto seleccionado
   useEffect(() => {
     const fetchNotes = async () => {
       if (selectedContact) {
@@ -68,12 +76,80 @@ export default function ChatPage() {
   }, [selectedContact]);
 
   // Función para hacer scroll hasta la nota clicada
-  const handleNoteClick = (note: any) => {
+  function handleNoteClick(note: any) {
     const element = document.getElementById(`note-${note.id}`);
     if (element) {
       element.scrollIntoView({ behavior: "smooth", block: "center" });
     }
-  };
+  }
+
+  // Función para eliminar una nota
+  async function deleteNote(noteId: number) {
+    const { error } = await supabase.from("conversaciones").delete().eq("id", noteId);
+    if (error) {
+      console.error("Error deleting note:", error);
+    } else {
+      const { data, error: fetchError } = await supabase
+        .from("conversaciones")
+        .select("*")
+        .eq("session_id", selectedContact?.session_id)
+        .eq("message->>type", "nota")
+        .order("id", { ascending: true });
+      if (fetchError) {
+        console.error("Error fetching notes:", fetchError);
+      } else {
+        setNotes(data || []);
+      }
+    }
+  }
+
+  // Función para eliminar una etiqueta desde el Perfil
+  async function deleteTag(tagKey: string) {
+    if (!selectedContact || !contactEtiquetas) return;
+    const updatedEtiquetas = { ...contactEtiquetas };
+    delete updatedEtiquetas[tagKey];
+    const { error } = await supabase
+      .from("contactos")
+      .update({ etiquetas: updatedEtiquetas })
+      .eq("session_id", selectedContact.session_id);
+    if (error) {
+      console.error("Error deleting tag:", error);
+    } else {
+      setContactEtiquetas(updatedEtiquetas);
+    }
+  }
+
+  // Función para pausar la automatización: actualiza is_paused a true
+  async function pauseAutomation() {
+    if (!selectedContact) return;
+    const { error } = await supabase
+      .from("contactos")
+      .update({ is_paused: true })
+      .eq("session_id", selectedContact.session_id);
+    if (error) {
+      console.error("Error pausing automation:", error);
+    } else {
+      setIsPaused(true);
+      setConfirmPause(false);
+      setConfirmResume(false);
+    }
+  }
+
+  // Función para reactivar la automatización: actualiza is_paused a false
+  async function resumeAutomation() {
+    if (!selectedContact) return;
+    const { error } = await supabase
+      .from("contactos")
+      .update({ is_paused: false })
+      .eq("session_id", selectedContact.session_id);
+    if (error) {
+      console.error("Error resuming automation:", error);
+    } else {
+      setIsPaused(false);
+      setConfirmPause(false);
+      setConfirmResume(false);
+    }
+  }
 
   return (
     <div className="flex flex-col h-full bg-gray-50 p-4">
@@ -114,7 +190,7 @@ export default function ChatPage() {
             </div>
           </div>
 
-          {/* Divisor con sombra sin espacio extra */}
+          {/* Divisor */}
           <div className="w-px bg-gray-300 shadow-[0_0_10px_rgba(0,0,0,0.3)]" />
 
           {selectedContact ? (
@@ -133,7 +209,7 @@ export default function ChatPage() {
                       {selectedContact.name}
                     </span>
                   </div>
-                  {/* Componente Conversation: se encarga de mostrar el chat, el selector Responder/Nota y el input */}
+                  {/* Componente Conversation */}
                   <Conversation
                     contactId={selectedContact.session_id}
                     messageMode={messageMode}
@@ -142,7 +218,7 @@ export default function ChatPage() {
                 </div>
               </div>
 
-              {/* Divisor con sombra sin espacio extra */}
+              {/* Divisor */}
               <div className="w-px bg-gray-300 shadow-[0_0_10px_rgba(0,0,0,0.3)]" />
 
               {/* Bloque 4: Perfil */}
@@ -158,30 +234,76 @@ export default function ChatPage() {
                   {/* Teléfono */}
                   <div className="flex items-center mb-4 space-x-1">
                     <Phone size={16} color="#818b9c" />
-                    <span className="text-sm text-gray-700">{selectedContact.session_id}</span>
+                    <span className="text-sm text-gray-700">
+                      {selectedContact.session_id}
+                    </span>
                   </div>
                   <hr className="w-full border-t border-gray-300 shadow-sm mb-4" />
-                  {/* Sección Automatizaciones */}
+
+                  {/* Sección de Automatizaciones */}
                   <div className="w-full mb-4">
-                    <p className="text-base font-semibold text-gray-800 mb-2">Automatizaciones</p>
-                    <button className="w-full bg-blue-500 hover:bg-blue-600 text-white text-sm font-medium py-2 px-4 rounded">
-                      Pausar
-                    </button>
+                    <p className="text-base font-semibold text-gray-800 mb-2">
+                      Automatizaciones
+                    </p>
+                    {isPaused ? (
+                      !confirmResume ? (
+                        <button
+                          onClick={() => setConfirmResume(true)}
+                          className="w-full text-sm font-medium py-2 px-4 rounded bg-red-500 text-white"
+                        >
+                          Pausado
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => resumeAutomation()}
+                          className="w-full text-sm font-medium py-2 px-4 rounded bg-black text-white hover:bg-gray-800"
+                        >
+                          Activar Automatización
+                        </button>
+                      )
+                    ) : !confirmPause ? (
+                      <button
+                        onClick={() => setConfirmPause(true)}
+                        className="w-full text-sm font-medium py-2 px-4 rounded bg-blue-500 hover:bg-blue-600 text-white"
+                      >
+                        Pausar
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => pauseAutomation()}
+                        className="w-full text-sm font-medium py-2 px-4 rounded bg-black text-white hover:bg-gray-800"
+                      >
+                        Pausar Automatización
+                      </button>
+                    )}
                   </div>
                   <hr className="w-full border-t border-gray-300 shadow-sm my-4" />
-                  {/* Sección Notas */}
+
+                  {/* Sección de Notas */}
                   <div className="w-full mb-4">
                     <p className="text-base font-semibold text-gray-800 mb-2">Notas</p>
                     {notes.length > 0 ? (
                       notes.map((note) => (
                         <div
                           key={note.id}
+                          id={`note-${note.id}`}
                           onClick={() => handleNoteClick(note)}
-                          className="mb-2 p-2 bg-[#fdf0d0] rounded cursor-pointer hover:opacity-90"
+                          className="relative mb-2 p-2 bg-[#fdf0d0] rounded cursor-pointer hover:opacity-80"
                         >
-                          <p className="text-sm text-gray-800">{note.message.content}</p>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              deleteNote(note.id);
+                            }}
+                            className="absolute top-0 right-0 text-gray-600 text-xs hover:text-gray-700"
+                          >
+                            X
+                          </button>
+                          <p className="text-sm text-gray-800">
+                            {note.message.content}
+                          </p>
                           <small className="text-xs text-gray-600">
-                            {new Date(note.created_at).toLocaleString()}
+                            {note.created_at ? new Date(note.created_at).toLocaleString() : ""}
                           </small>
                         </div>
                       ))
@@ -190,9 +312,12 @@ export default function ChatPage() {
                     )}
                   </div>
                   <hr className="w-full border-t border-gray-300 shadow-sm my-4" />
-                  {/* Sección Etiquetas */}
+
+                  {/* Sección de Etiquetas */}
                   <div className="w-full flex items-center justify-between mb-4">
-                    <span className="text-base font-semibold text-gray-800">Etiquetas</span>
+                    <span className="text-base font-semibold text-gray-800">
+                      Etiquetas
+                    </span>
                     <span className="text-base font-semibold" style={{ color: "#4585fb" }}>
                       + Añadir Etiqueta
                     </span>
@@ -202,12 +327,17 @@ export default function ChatPage() {
                     {contactEtiquetas && Object.keys(contactEtiquetas).length > 0 ? (
                       Object.entries(contactEtiquetas).map(([key, value]) =>
                         value.toString().trim() !== "" ? (
-                          <span
-                            key={key}
-                            className="px-2 py-1 rounded-full text-sm font-medium bg-[#eff7ff] text-gray-800 border border-[#80c2ff]"
-                          >
-                            {value}
-                          </span>
+                          <div key={key} className="relative inline-block">
+                            <span className="px-2 py-1 rounded-full text-sm font-medium bg-[#eff7ff] text-gray-800 border border-[#80c2ff]">
+                              {value}
+                            </span>
+                            <button
+                              onClick={() => deleteTag(key)}
+                              className="absolute -top-1 -right-1 text-black text-xs hover:text-gray-700"
+                            >
+                              X
+                            </button>
+                          </div>
                         ) : null
                       )
                     ) : (
