@@ -7,6 +7,14 @@ import ContactListMini, { Contact } from "@/components/ContactListMini";
 import Conversation from "@/components/Conversation";
 import { supabase } from "@/utils/supabaseClient";
 
+/* ---------- Tipado añadido para evitar any ---------- */
+interface Note {
+  id: number;
+  message: { content: string };
+  created_at?: string;
+}
+/* ---------------------------------------------------- */
+
 const filterOptions = [
   { label: "No Asignado", Icon: XCircle },
   { label: "Tú", Icon: User },
@@ -17,9 +25,12 @@ const filterOptions = [
 export default function ChatPage() {
   const [activeFilter, setActiveFilter] = useState("No Asignado");
   const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
-  const [contactEtiquetas, setContactEtiquetas] = useState<{ [key: string]: string } | null>(null);
-  const [messageMode, setMessageMode] = useState<"Responder" | "Nota">("Responder");
-  const [notes, setNotes] = useState<any[]>([]);
+  const [contactEtiquetas, setContactEtiquetas] =
+    useState<{ [key: string]: string } | null>(null);
+  const [messageMode, setMessageMode] = useState<"Responder" | "Nota">(
+    "Responder"
+  );
+  const [notes, setNotes] = useState<Note[]>([]); // ← antes any[]
   const [confirmPause, setConfirmPause] = useState(false);
   const [confirmResume, setConfirmResume] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
@@ -27,6 +38,7 @@ export default function ChatPage() {
   // Nuevo estado para el input de búsqueda (solo visual por ahora)
   const [headerSearch, setHeaderSearch] = useState("");
 
+  /* ---------- Obtener etiquetas e is_paused ---------- */
   useEffect(() => {
     const fetchEtiquetas = async () => {
       if (selectedContact) {
@@ -51,6 +63,7 @@ export default function ChatPage() {
     fetchEtiquetas();
   }, [selectedContact]);
 
+  /* ---------- Obtener notas ---------- */
   useEffect(() => {
     const fetchNotes = async () => {
       if (selectedContact) {
@@ -64,7 +77,7 @@ export default function ChatPage() {
           console.error("Error fetching notes:", error);
           setNotes([]);
         } else {
-          setNotes(data || []);
+          setNotes((data || []) as Note[]); // ← casteo seguro
         }
       } else {
         setNotes([]);
@@ -73,7 +86,8 @@ export default function ChatPage() {
     fetchNotes();
   }, [selectedContact]);
 
-  function handleNoteClick(note: any) {
+  /* ---------- Handlers ---------- */
+  function handleNoteClick(note: Note) {
     const element = document.getElementById(`note-${note.id}`);
     if (element) {
       element.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -81,7 +95,10 @@ export default function ChatPage() {
   }
 
   async function deleteNote(noteId: number) {
-    const { error } = await supabase.from("conversaciones").delete().eq("id", noteId);
+    const { error } = await supabase
+      .from("conversaciones")
+      .delete()
+      .eq("id", noteId);
     if (!error) {
       const { data } = await supabase
         .from("conversaciones")
@@ -89,7 +106,7 @@ export default function ChatPage() {
         .eq("session_id", selectedContact?.session_id)
         .eq("message->>type", "nota")
         .order("id", { ascending: true });
-      setNotes(data || []);
+      setNotes((data || []) as Note[]);
     }
   }
 
@@ -130,6 +147,7 @@ export default function ChatPage() {
     }
   }
 
+  /* ---------- JSX ---------- */
   return (
     <div className="flex flex-col h-full bg-gray-50 p-4">
       {/* Encabezado de la Página con búsqueda */}
@@ -167,7 +185,7 @@ export default function ChatPage() {
           </div>
         </div>
 
-        {/* Contenedor para Bloque 2 (Mini Tabla de Contactos) y contenido */}
+        {/* Contenedor Bloque 2 y contenido */}
         <div className="flex flex-1">
           {/* Bloque 2: Mini Tabla de Contactos */}
           <div className="w-1/4">
@@ -211,7 +229,9 @@ export default function ChatPage() {
               {/* Bloque 4: Perfil */}
               <div className="w-1/4">
                 <div className="bg-white shadow rounded p-4 h-full flex flex-col">
-                  <h2 className="text-xl font-bold mb-2">{selectedContact.name}</h2>
+                  <h2 className="text-xl font-bold mb-2">
+                    {selectedContact.name}
+                  </h2>
                   <img
                     src="/avatar-placeholder.png"
                     alt={selectedContact.name}
@@ -225,7 +245,7 @@ export default function ChatPage() {
                   </div>
                   <hr className="w-full border-t border-gray-300 shadow-sm mb-4" />
 
-                  {/* Sección de Automatizaciones */}
+                  {/* Automatizaciones */}
                   <div className="w-full mb-4">
                     <p className="text-base font-semibold text-gray-800 mb-2">
                       Automatizaciones
@@ -240,7 +260,7 @@ export default function ChatPage() {
                         </button>
                       ) : (
                         <button
-                          onClick={() => resumeAutomation()}
+                          onClick={resumeAutomation}
                           className="w-full text-sm font-medium py-2 px-4 rounded bg-black text-white hover:bg-gray-800"
                         >
                           Activar Automatización
@@ -255,7 +275,7 @@ export default function ChatPage() {
                       </button>
                     ) : (
                       <button
-                        onClick={() => pauseAutomation()}
+                        onClick={pauseAutomation}
                         className="w-full text-sm font-medium py-2 px-4 rounded bg-black text-white hover:bg-gray-800"
                       >
                         Pausar
@@ -264,9 +284,11 @@ export default function ChatPage() {
                   </div>
                   <hr className="w-full border-t border-gray-300 shadow-sm my-4" />
 
-                  {/* Sección de Notas */}
+                  {/* Notas */}
                   <div className="w-full mb-4">
-                    <p className="text-base font-semibold text-gray-800 mb-2">Notas</p>
+                    <p className="text-base font-semibold text-gray-800 mb-2">
+                      Notes
+                    </p>
                     {notes.length > 0 ? (
                       notes.map((note) => (
                         <div
@@ -284,7 +306,9 @@ export default function ChatPage() {
                           >
                             X
                           </button>
-                          <p className="text-sm text-gray-800">{note.message.content}</p>
+                          <p className="text-sm text-gray-800">
+                            {note.message.content}
+                          </p>
                           <small className="text-xs text-gray-600">
                             {note.created_at
                               ? new Date(note.created_at).toLocaleString()
@@ -298,7 +322,7 @@ export default function ChatPage() {
                   </div>
                   <hr className="w-full border-t border-gray-300 shadow-sm my-4" />
 
-                  {/* Sección de Etiquetas */}
+                  {/* Etiquetas */}
                   <div className="w-full flex items-center justify-between mb-4">
                     <span className="text-base font-semibold text-gray-800">
                       Etiquetas
