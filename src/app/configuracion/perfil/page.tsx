@@ -11,6 +11,8 @@ export default function PerfilPage() {
   const [profile, setProfile] = useState<{ name: string; avatar_url: string | null } | null>(null);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string>("");
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
@@ -29,35 +31,73 @@ export default function PerfilPage() {
       .select("name, avatar_url")
       .eq("id", user.id)
       .single();
-    if (data) {
-      setProfile({ name: data.name, avatar_url: data.avatar_url });
-    } else {
+
+    if (error) {
+      console.warn("Perfil no encontrado:", error.message);
       const fallback = (user.user_metadata as any)?.name || "Usuario";
       setProfile({ name: fallback, avatar_url: null });
-      console.warn("Perfil no encontrado:", error?.message);
+      setPreviewUrl("");
+    } else {
+      setProfile({ name: data.name, avatar_url: data.avatar_url });
+      setPreviewUrl(data.avatar_url ?? "");
     }
+
     setLoading(false);
   }
 
-  async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
-    if (!e.target.files?.[0] || !user) return;
+  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0] ?? null;
+    if (file) {
+      const name = file.name.toLowerCase();
+      if (!name.endsWith(".jpg")) {
+        alert("Solo se permiten archivos con extensión .jpg");
+        return;
+      }
+      setSelectedFile(file);
+      setPreviewUrl(URL.createObjectURL(file));
+    }
+  }
+
+  async function applyChanges() {
+    if (!selectedFile || !user) return;
     setUploading(true);
-    const file = e.target.files[0];
+
+    const file = selectedFile;
     const ext = file.name.split(".").pop();
     const path = `avatars/${user.id}.${ext}`;
 
+    // 1) Subir al storage
     const { error: upErr } = await supabase.storage
       .from("avatars")
       .upload(path, file, { upsert: true });
     if (upErr) {
       console.error("Error subiendo avatar:", upErr.message);
+      alert("No se pudo subir la imagen: " + upErr.message);
       setUploading(false);
       return;
     }
 
+    // 2) Obtener URL pública
     const { data: urlData } = supabase.storage.from("avatars").getPublicUrl(path);
-    await supabase.from("profiles").update({ avatar_url: urlData.publicUrl }).eq("id", user.id);
-    setProfile(p => (p ? { ...p, avatar_url: urlData.publicUrl } : p));
+    const publicUrl = urlData.publicUrl;
+
+    // 3) Actualizar tabla profiles y devolver la fila
+    const { data: updated, error: dbError } = await supabase
+      .from("profiles")
+      .update({ avatar_url: publicUrl })
+      .eq("id", user.id)
+      .select()
+      .single();
+
+    if (dbError) {
+      console.error("❌ Error actualizando perfil en la BBDD:", dbError.message);
+      alert("No se pudo guardar la foto en el perfil: " + dbError.message);
+    } else {
+      console.log("✅ Perfil actualizado:", updated);
+      await loadProfile(user);
+      setSelectedFile(null);
+    }
+
     setUploading(false);
   }
 
@@ -71,34 +111,26 @@ export default function PerfilPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Empuja la tarjeta exactamente igual que en Etiquetas */}
       <div className="flex items-center justify-center pt-24 px-8">
         <div
           className="group bg-white rounded-lg shadow-lg p-10 max-w-md w-full text-center
                      transition-transform duration-200 hover:-translate-y-1 hover:shadow-2xl"
         >
-          {/* Icono estático arriba */}
           <User className="mx-auto mb-4 w-12 h-12 text-blue-500" />
 
           <h1 className="text-2xl font-bold text-gray-800 mb-4">Mi Perfil</h1>
-
-          {/* Línea separadora */}
           <hr className="border-t border-gray-100 mb-6" />
-
-          {/* Nombre del miembro encima de la foto */}
           <h2 className="text-xl font-semibold text-gray-700 mb-4">{profile?.name}</h2>
 
-          {/* Avatar */}
           <div className="mx-auto mb-6 w-32 h-32 relative rounded-full overflow-hidden border-2 border-gray-200">
             <Image
-              src={profile?.avatar_url ?? "/avatar-placeholder.png"}
+              src={previewUrl || "/avatar-placeholder.png"}
               alt="Avatar"
               fill
               className="object-cover"
             />
           </div>
 
-          {/* Fecha de alta */}
           <p className="text-sm text-gray-500 mb-6">
             {user.created_at
               ? `Miembro desde ${new Date(user.created_at).toLocaleDateString("es-ES", {
@@ -109,23 +141,34 @@ export default function PerfilPage() {
               : ""}
           </p>
 
-          {/* Botón cambiar foto */}
-          <label className="inline-block mb-4">
+          {/* Seleccionar Imagen */}
+          <label className="block mb-2 text-center">
             <input
               type="file"
-              accept="image/*"
+              accept=".jpg"
               className="hidden"
-              onChange={handleUpload}
+              onChange={handleFileChange}
             />
-            <span
-              className={`bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded cursor-pointer transition
-                          ${uploading ? "opacity-70 pointer-events-none" : ""}`}
-            >
-              {uploading ? "Subiendo..." : "Cambiar Foto"}
+            <span className="inline-block bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded cursor-pointer transition">
+              Seleccionar Imagen
             </span>
           </label>
 
-          {/* Indicador de carga */}
+          {/* Aplicar Cambios */}
+          <button
+            onClick={applyChanges}
+            disabled={!selectedFile || uploading}
+            className="
+              inline-block mb-4 mx-auto
+              bg-blue-600 hover:bg-blue-700
+              disabled:bg-gray-400 disabled:hover:bg-gray-400
+              text-white font-medium py-2 px-4 rounded
+              cursor-pointer transition
+            "
+          >
+            {uploading ? "Aplicando..." : "Aplicar Cambios"}
+          </button>
+
           {uploading && (
             <div className="mt-6 flex items-center justify-center space-x-2">
               <Loader2 className="text-blue-500 w-6 h-6 animate-spin" />

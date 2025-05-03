@@ -84,7 +84,7 @@ export default function HomeDashboard() {
             {/* 3. Automatizaciones */}
             <div className="bg-white shadow rounded-lg p-6 flex flex-col items-center justify-between transition-transform duration-500 hover:scale-105">
               <h2 className="text-2xl font-semibold text-gray-800 mb-4 text-center">
-                Automatizaciones
+                Automatización
               </h2>
               <p className="text-gray-600 mb-6 text-center">
                 Administra las secuencias y flujos automatizados del sistema.
@@ -93,7 +93,7 @@ export default function HomeDashboard() {
                 href="/automatizaciones"
                 className="inline-block bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded text-center"
               >
-                Ver Automatizaciones
+                Ver Automatización
               </a>
             </div>
           </div>
