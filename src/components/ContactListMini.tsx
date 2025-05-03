@@ -183,7 +183,7 @@ export default function ContactListMini({
         }
       )
       .subscribe();
-    return () => supabase.removeChannel(chan);
+    return () => { void supabase.removeChannel(chan); };
   }, []);
 
   // Subscribe to contact updates, including last_viewed_at
@@ -223,7 +223,7 @@ export default function ContactListMini({
         }
       )
       .subscribe();
-    return () => supabase.removeChannel(chan);
+    return () => { void supabase.removeChannel(chan); };
   }, [filter, statusFilter]);
 
   const handleSelect = async (c: Contact) => {

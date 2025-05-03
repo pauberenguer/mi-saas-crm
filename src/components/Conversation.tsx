@@ -95,6 +95,9 @@ export default function Conversation({
           selectedImages.length > 0
         );
 
+  // Origen del mensaje para additional_kwargs
+  const messageOrigin = messageMode === "Nota" ? "note" : "crm";
+
   // 1) Obtener avatar y plantillas
   useEffect(() => {
     supabase.auth.getUser()
@@ -152,7 +155,9 @@ export default function Conversation({
         ({ new: row }) => setMessages(prev => [...prev, row])
       )
       .subscribe();
-    return () => supabase.removeChannel(chan);
+    return () => {
+      supabase.removeChannel(chan);
+    };
   }, [contactId]);
 
   // 4) Verificar bloqueo 24h
@@ -357,7 +362,7 @@ export default function Conversation({
           message: {
             type: "human",
             content: selectedTpl.body_text,
-            additional_kwargs: { origin: messageMode === "Nota" ? "note" : "crm" },
+            additional_kwargs: { origin: messageOrigin },
             response_metadata: {},
           },
         }]);
@@ -389,7 +394,7 @@ export default function Conversation({
           message: {
             type: "human",
             content: publicUrl,
-            additional_kwargs: { origin: messageMode === "Nota" ? "note" : "crm" },
+            additional_kwargs: { origin: messageOrigin },
             response_metadata: {},
           },
         }]);
@@ -406,7 +411,7 @@ export default function Conversation({
             .eq("session_id", contactId);
         }
       }
-      setSelectedImages([]); setImagePreviews([]); setNewMessage("");
+      setSelectedImages([]);         setImagePreviews([]);         setNewMessage("");
       return;
     }
 
@@ -417,7 +422,7 @@ export default function Conversation({
       message: {
         type: "human",
         content: newMessage.trim(),
-        additional_kwargs: { origin: messageMode === "Nota" ? "note" : "crm" },
+        additional_kwargs: { origin: messageOrigin },
         response_metadata: {},
       },
     }]);
@@ -625,7 +630,7 @@ export default function Conversation({
             <button onClick={handleImageClick} className="p-1"><ImageIcon size={20} color="#818b9c" /></button>
             <button onClick={handleMicClick} className="p-1"><Mic size={20} color="#818b9c" /></button>
           </>
-        )}  
+        )}
 
         {/* Durante grabación */}
         {!responderLocked && recording && (

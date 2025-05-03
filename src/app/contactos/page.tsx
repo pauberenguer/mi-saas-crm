@@ -1,3 +1,4 @@
+// File: src/app/contactos/page.tsx
 "use client";
 
 import { useEffect, useState } from "react";
@@ -50,7 +51,7 @@ export default function ContactosPage() {
   // Carga inicial de contactos
   useEffect(() => {
     supabase
-      .from<Contact>("contactos")
+      .from("contactos")
       .select("*")
       .order("name", { ascending: true })
       .then(({ data, error }) => {
@@ -66,7 +67,7 @@ export default function ContactosPage() {
       return;
     }
     supabase
-      .from<Note>("conversaciones")
+      .from("conversaciones")
       .select("*")
       .eq("session_id", selectedProfile.session_id)
       .eq("message->additional_kwargs->>origin", "note")
@@ -415,9 +416,7 @@ export default function ContactosPage() {
                 <p className="text-gray-600">{selectedProfile.session_id}</p>
                 <p className="text-gray-600 mt-2">
                   Suscrito:{" "}
-                  {new Date(
-                    selectedProfile.created_at
-                  ).toLocaleDateString()}
+                  {new Date(selectedProfile.created_at).toLocaleDateString()}
                 </p>
 
                 {/* Etiquetas */}

@@ -71,17 +71,24 @@ export default function ChatPage() {
 
   // Load current user
   useEffect(() => {
-    supabase.auth.getUser().then(({ data: { user } }) => setCurrentUser(user));
+    async function fetchUser() {
+      const { data } = await supabase.auth.getUser();
+      setCurrentUser(data.user);
+    }
+    fetchUser();
   }, []);
 
   // Load profiles
   useEffect(() => {
     supabase
-      .from<Profile>("profiles")
+      .from("profiles")
       .select("id, name, avatar_url")
-      .then((res) => {
-        if (res.error) console.error(res.error);
-        else setProfiles(res.data || []);
+      .then(res => {
+        if (res.error) {
+          console.error(res.error);
+        } else {
+          setProfiles(res.data as Profile[]);
+        }
       });
   }, []);
 
@@ -110,14 +117,15 @@ export default function ChatPage() {
       .select("etiquetas, is_paused")
       .eq("session_id", selectedContact.session_id)
       .single()
-      .then(({ data, error }) => {
-        if (error) {
-          console.error(error);
+      .then(res => {
+        if (res.error) {
+          console.error(res.error);
           setContactEtiquetas({});
           setIsPaused(false);
         } else {
-          setContactEtiquetas(data?.etiquetas || {});
-          setIsPaused(data?.is_paused || false);
+          const data = res.data as { etiquetas: Record<string, string>; is_paused: boolean };
+          setContactEtiquetas(data.etiquetas || {});
+          setIsPaused(data.is_paused || false);
         }
       });
   }, [selectedContact]);
@@ -148,21 +156,6 @@ export default function ChatPage() {
     };
   }, [selectedContact]);
 
-  // Fetch notes
-  useEffect(() => {
-    if (!selectedContact) return;
-    supabase
-      .from("conversaciones")
-      .select("*")
-      .eq("session_id", selectedContact.session_id)
-      .eq("message->additional_kwargs->>origin", "note")
-      .order("id", { ascending: true })
-      .then(({ data, error }) => {
-        if (error) console.error(error);
-        else setNotes(data as Note[]);
-      });
-  }, [selectedContact]);
-
   // Play sound on new human message
   useEffect(() => {
     const channel = supabase
@@ -170,7 +163,7 @@ export default function ChatPage() {
       .on(
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "conversaciones" },
-        (payload) => {
+        payload => {
           const mRaw = (payload.new as any).message;
           const m = typeof mRaw === "string" ? JSON.parse(mRaw) : mRaw;
           const origin = m.additional_kwargs?.origin;
@@ -194,15 +187,32 @@ export default function ChatPage() {
           event: "INSERT", schema: "public", table: "conversaciones",
           filter: `session_id=eq.${selectedContact.session_id}`,
         },
-        (payload) => {
+        payload => {
           const row = payload.new as any;
           if (row.message?.additional_kwargs?.origin === "note") {
-            setNotes((prev) => [...prev, row as Note]);
+            setNotes(prev => [...prev, row as Note]);
           }
         }
       )
       .subscribe();
-    return () => supabase.removeChannel(channel);
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [selectedContact]);
+
+  // Fetch notes
+  useEffect(() => {
+    if (!selectedContact) return;
+    supabase
+      .from("conversaciones")
+      .select("*")
+      .eq("session_id", selectedContact.session_id)
+      .eq("message->additional_kwargs->>origin", "note")
+      .order("id", { ascending: true })
+      .then(res => {
+        if (res.error) console.error(res.error);
+        else setNotes(res.data as Note[]);
+      });
   }, [selectedContact]);
 
   // Fetch states of selected for closed-check
@@ -212,12 +222,12 @@ export default function ChatPage() {
       return;
     }
     supabase
-      .from<{ session_id: string; estado: string }>("contactos")
+      .from("contactos")
       .select("session_id, estado")
       .in("session_id", selectedIds)
-      .then(({ data, error }) => {
-        if (error) console.error(error);
-        else setSelectedContactStates(data || []);
+      .then(res => {
+        if (res.error) console.error(res.error);
+        else setSelectedContactStates(res.data as { session_id: string; estado: string }[]);
       });
   }, [selectedIds]);
 
@@ -229,7 +239,8 @@ export default function ChatPage() {
   const deleteNote = (id: number) => {
     supabase
       .from("conversaciones")
-      .delete().eq("id", id)
+      .delete()
+      .eq("id", id)
       .then(() => {
         if (!selectedContact) return;
         return supabase
@@ -239,7 +250,9 @@ export default function ChatPage() {
           .eq("message->additional_kwargs->>origin", "note")
           .order("id", { ascending: true });
       })
-      .then(({ data }) => setNotes(data as Note[]));
+      .then(res => {
+        if (res?.data) setNotes(res.data as Note[]);
+      });
   };
   const deleteTag = async (key: string) => {
     if (!selectedContact || !contactEtiquetas) return;
@@ -450,7 +463,7 @@ export default function ChatPage() {
                       </p>
                       <button
                         ref={assignButtonRef}
-                        onClick={() => setShowAssignMenu((v) => !v)}
+                        onClick={() => setShowAssignMenu(v => !v)}
                         className="border-2 border-gray-300 w-64 px-4 py-2 rounded flex items-center justify-center hover:bg-gray-100"
                       >
                         <UserPlus className="w-4 h-4 mr-1" />
@@ -483,9 +496,9 @@ export default function ChatPage() {
                       {showAssignMenu && (
                         <div
                           ref={assignMenuRef}
-                          className="absolute top-full	mt-2 bg-white border border-gray-200 rounded shadow-lg w-64 max-h-60 overflow-y-auto z-20"
+                          className="absolute top-full mt-2 bg-white border border-gray-200 rounded shadow-lg w-64 max-h-60 overflow-y-auto z-20"
                         >
-                          {profiles.map((p) => (
+                          {profiles.map(p => (
                             <button
                               key={p.id}
                               onClick={() => assignConversationsTo(p.id)}
@@ -574,7 +587,7 @@ export default function ChatPage() {
                     <div className="mb-4">
                       <p className="font-semibold mb-2">Notas</p>
                       {notes.length > 0 ? (
-                        notes.map((note) => (
+                        notes.map(note => (
                           <div
                             key={note.id}
                             id={`note-${note.id}`}
@@ -582,7 +595,7 @@ export default function ChatPage() {
                             className="relative p-2 mb-2 bg-[#fdf0d0] rounded cursor-pointer hover:opacity-80"
                           >
                             <button
-                              onClick={(e) => {
+                              onClick={e => {
                                 e.stopPropagation();
                                 deleteNote(note.id);
                               }}
@@ -609,21 +622,20 @@ export default function ChatPage() {
                     <p className="font-semibold mb-2">Etiquetas</p>
                     <div className="flex flex-wrap gap-2">
                       {contactEtiquetas &&
-                        Object.entries(contactEtiquetas).map(
-                          ([key, value]) =>
-                            value.trim() && (
-                              <div key={key} className="relative inline-block">
-                                <span className="px-2 py-1 text-sm font-medium bg-[#eff7ff] text-gray-800 border border-[#80c2ff] rounded-full">
-                                  {value}
-                                </span>
-                                <button
-                                  onClick={() => deleteTag(key)}
-                                  className="absolute -top-1 -right-1 text-xs text-black hover:text-gray-700"
-                                >
-                                  X
-                                </button>
-                              </div>
-                            )
+                        Object.entries(contactEtiquetas).map(([key, value]) =>
+                          value.trim() ? (
+                            <div key={key} className="relative inline-block">
+                              <span className="px-2 py-1 text-sm font-medium bg-[#eff7ff] text-gray-800 border border-[#80c2ff] rounded-full">
+                                {value}
+                              </span>
+                              <button
+                                onClick={() => deleteTag(key)}
+                                className="absolute -top-1 -right-1 text-xs text-black hover:text-gray-700"
+                              >
+                                X
+                              </button>
+                            </div>
+                          ) : null
                         )}
                     </div>
                   </div>

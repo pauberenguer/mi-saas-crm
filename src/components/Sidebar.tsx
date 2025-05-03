@@ -1,3 +1,4 @@
+// File: src/components/Sidebar.tsx
 "use client";
 
 import { useState, useEffect } from "react";
@@ -45,7 +46,7 @@ export default function Sidebar() {
   // 2) Cargo last_viewed_at de cada contacto
   useEffect(() => {
     supabase
-      .from<{ session_id: string; last_viewed_at: string }>("contactos")
+      .from("contactos")
       .select("session_id, last_viewed_at")
       .then(({ data }) => {
         if (!data) return;
@@ -66,7 +67,7 @@ export default function Sidebar() {
       await Promise.all(
         sids.map(async sid => {
           const { data: msgs } = await supabase
-            .from<{ created_at: string }>("conversaciones")
+            .from("conversaciones")
             .select("created_at")
             .eq("session_id", sid)
             .order("created_at", { ascending: false })

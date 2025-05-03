@@ -17,7 +17,7 @@ export default function MiembrosPage() {
   useEffect(() => {
     (async () => {
       const { data, error } = await supabase
-        .from<Profile>("profiles")
+        .from("profiles")            // ← Aquí quitamos el genérico <Profile>
         .select("id, name");
       if (error) {
         console.error("Error fetching members:", error);
@@ -31,8 +31,12 @@ export default function MiembrosPage() {
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="flex items-center justify-center pt-24 px-4">
-        <div className="group bg-white rounded-lg shadow-2xl p-10 max-w-3xl w-full
-                        transition-transform duration-200 hover:-translate-y-1 hover:shadow-xl">
+        <div
+          className="
+            group bg-white rounded-lg shadow-2xl p-10 max-w-3xl w-full
+            transition-transform duration-200 hover:-translate-y-1 hover:shadow-xl
+          "
+        >
           {/* Cabecera */}
           <div className="text-center mb-8">
             <Users className="w-12 h-12 text-blue-500 mx-auto mb-4" />
@@ -55,8 +59,10 @@ export default function MiembrosPage() {
               {members.map((member) => (
                 <li
                   key={member.id}
-                  className="flex items-center p-4 border border-gray-200 rounded-lg 
-                             hover:shadow-xl hover:scale-105 transition-transform duration-200"
+                  className="
+                    flex items-center p-4 border border-gray-200 rounded-lg
+                    hover:shadow-xl hover:scale-105 transition-transform duration-200
+                  "
                 >
                   <Users className="w-6 h-6 text-blue-500 mr-3 flex-shrink-0" />
                   <span className="text-gray-800 font-medium">{member.name}</span>
