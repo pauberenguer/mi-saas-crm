@@ -1,24 +1,28 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  /*  ───── Comportamiento de React/Next ───── */
   reactStrictMode: true,
-  eslint: {
-    ignoreDuringBuilds: true,
-  },
-  typescript: {
-    ignoreBuildErrors: true,
-  },
+
+  /*  ───── Linter y TypeScript en CI ───── */
+  eslint:     { ignoreDuringBuilds: true },
+  typescript: { ignoreBuildErrors: true },
+
+  /*  ───── Carga de imágenes remotas ───── */
   images: {
-    // en lugar de `domains`, definimos remotePatterns:
     remotePatterns: [
       {
         protocol: 'https',
         hostname: 'cuyrdzzqlzibyketxrlk.supabase.co',
         port: '',
-        // como tus imágenes vienen de /storage/v1/object/public/avatars/…
         pathname: '/storage/v1/object/public/avatars/**',
       },
     ],
   },
+
+  /*  ───── IMPORTANTE ─────
+      No declares assetPrefix ni basePath
+      porque sirves en la raíz del dominio.
+  */
 };
 
 module.exports = nextConfig;
