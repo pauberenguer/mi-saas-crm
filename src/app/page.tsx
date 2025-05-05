@@ -1,6 +1,7 @@
 // File: src/app/page.tsx
 "use client";
 
+import React from "react";
 import { useRouter } from "next/navigation";
 import { MessageCircle, Users, Zap, Lock } from "lucide-react";
 

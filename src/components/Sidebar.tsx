@@ -1,6 +1,7 @@
 // File: src/components/Sidebar.tsx
 "use client";
 
+import React from "react";
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -11,7 +12,7 @@ import {
   Zap,
   Settings,
 } from "lucide-react";
-import { supabase } from "@/utils/supabaseClient";
+import { supabase } from "../utils/supabaseClient";
 
 const navItems = [
   { name: "Inicio",         href: "/inicio",          Icon: Home },

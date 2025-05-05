@@ -1,6 +1,7 @@
 // File: src/app/automatizaciones/page.tsx
 "use client";
 
+import React from "react";
 import { Zap, Loader2 } from "lucide-react";
 
 export default function AutomatizacionesPage() {

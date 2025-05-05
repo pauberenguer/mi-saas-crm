@@ -2,9 +2,10 @@
 
 import "./globals.css";
 import { ReactNode, useEffect, useRef } from "react";
-import Sidebar from "@/components/Sidebar";
+import Sidebar from "../components/Sidebar";
 import { usePathname } from "next/navigation";
-import { supabase } from "@/utils/supabaseClient";
+import { supabase } from "../utils/supabaseClient";
+import React from "react";
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname();

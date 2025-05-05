@@ -1,7 +1,7 @@
 // src/app/chat/page.tsx
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   XCircle,
   User,
@@ -13,9 +13,9 @@ import {
   UserPlus,
   XCircle as XIcon,
 } from "lucide-react";
-import ContactListMini, { Contact, FilterType } from "@/components/ContactListMini";
-import Conversation from "@/components/Conversation";
-import { supabase } from "@/utils/supabaseClient";
+import ContactListMini, { Contact, FilterType } from "../../components/ContactListMini";
+import Conversation from "../../components/Conversation";
+import { supabase } from "../../utils/supabaseClient";
 
 interface Note {
   id: number;

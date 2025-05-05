@@ -1,11 +1,11 @@
 // File: src/app/configuracion/perfil/page.tsx
 "use client";
 
+import React from "react";
 import { useState, useEffect } from "react";
 import Image from "next/image";
 import { User, Loader2 } from "lucide-react";
-import { supabase } from "@/utils/supabaseClient";
-
+import { supabase } from "../../../lib/supabaseClient";
 export default function PerfilPage() {
   const [user, setUser] = useState<any>(null);
   const [profile, setProfile] = useState<{ name: string; avatar_url: string | null } | null>(null);

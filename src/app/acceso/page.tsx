@@ -1,9 +1,9 @@
 // File: src/app/acceso/page.tsx
 "use client";
 
-import { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { supabase } from "@/utils/supabaseClient";
+import { supabase } from "../../utils/supabaseClient";
 import { Hand } from "lucide-react";
 
 export default function AccessPage() {

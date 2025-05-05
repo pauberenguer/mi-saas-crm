@@ -2,8 +2,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { supabase } from "@/utils/supabaseClient";
+import { supabase } from "../../utils/supabaseClient";
 import { Filter, Search } from "lucide-react";
+import React from "react";
 
 interface Contact {
   session_id: string;

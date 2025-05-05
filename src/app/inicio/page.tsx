@@ -1,5 +1,6 @@
 // File: src/app/inicio/page.tsx
 "use client";
+import React from "react";
 
 export default function HomeDashboard() {
   return (

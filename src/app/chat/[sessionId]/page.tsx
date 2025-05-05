@@ -1,9 +1,10 @@
 // src/app/chat/[sessionId]/page.tsx
 "use client";
 
+import React from "react";
 import { useRouter, useParams } from "next/navigation";
-import Chat from "@/components/Chat";
-import ContactList, { Contact } from "@/components/ContactList";
+import Chat from "../../../components/Chat";
+import ContactList, { Contact } from "../../../components/ContactList";
 
 export default function ChatDetailPage() {
   // tipamos useParams para evitar any

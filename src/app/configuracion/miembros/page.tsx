@@ -1,9 +1,9 @@
 // File: src/app/configuracion/miembros/page.tsx
 "use client";
 
-import { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import { Users, Loader2 } from "lucide-react";
-import { supabase } from "@/utils/supabaseClient";
+import { supabase } from "../../../utils/supabaseClient";
 
 interface Profile {
   id: string;
