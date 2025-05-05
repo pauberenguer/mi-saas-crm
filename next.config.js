@@ -7,6 +7,15 @@ const nextConfig = {
   eslint:     { ignoreDuringBuilds: true },
   typescript: { ignoreBuildErrors: true },
 
+  /*  ───── Optimizaciones para producción ───── */
+  poweredByHeader: false,
+  compress: true,
+  
+  /*  ───── Configura el entorno de producción ───── */
+  // Descomentar y ajustar si sirves desde una ruta que no es la raíz del dominio
+  // basePath: '',
+  // assetPrefix: '',
+
   /*  ───── Carga de imágenes remotas ───── */
   images: {
     remotePatterns: [
@@ -17,11 +26,14 @@ const nextConfig = {
         pathname: '/storage/v1/object/public/avatars/**',
       },
     ],
+    // Permite dominios para imágenes
+    domains: ['cuyrdzzqlzibyketxrlk.supabase.co'],
   },
 
   /*  ───── IMPORTANTE ─────
-      No declares assetPrefix ni basePath
-      porque sirves en la raíz del dominio.
+      Si sirves desde un subdirectorio, usa:
+      basePath: '/tu-subdirectorio'
+      assetPrefix: '/tu-subdirectorio'
   */
 };
 

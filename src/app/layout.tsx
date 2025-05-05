@@ -1,7 +1,7 @@
 "use client";
 
 import "./globals.css";
-import { ReactNode, useEffect, useRef } from "react";
+import { ReactNode, useEffect, useRef, useState } from "react";
 import Sidebar from "../components/Sidebar";
 import { usePathname } from "next/navigation";
 import { supabase } from "../utils/supabaseClient";
@@ -14,6 +14,21 @@ export default function RootLayout({ children }: { children: ReactNode }) {
 
   // Ref para reproducir sonido
   const audioRef = useRef<HTMLAudioElement>(null);
+  
+  // Estado para controlar el tema de la interfaz
+  const [theme, setTheme] = useState<'light' | 'dark'>('light');
+  
+  useEffect(() => {
+    // Detectar preferencia de tema del sistema
+    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+    setTheme(mediaQuery.matches ? 'dark' : 'light');
+    
+    // Escuchar cambios en la preferencia de tema
+    const handler = (e: MediaQueryListEvent) => setTheme(e.matches ? 'dark' : 'light');
+    mediaQuery.addEventListener('change', handler);
+    
+    return () => mediaQuery.removeEventListener('change', handler);
+  }, []);
 
   useEffect(() => {
     // Suscripción global a nuevos mensajes de cliente
@@ -40,11 +55,12 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <html lang="es">
+    <html lang="es" className={theme}>
       <head>
         <meta charSet="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
       </head>
-      <body className="flex h-screen overflow-hidden">
+      <body className="flex h-screen overflow-hidden bg-background text-foreground">
         {/* Audio oculto disponible en todas las páginas */}
         <audio
           ref={audioRef}
