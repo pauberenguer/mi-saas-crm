@@ -12,15 +12,9 @@ const nextConfig = {
   compress: true,
   
   /*  ───── Configura el entorno de producción ───── */
-  // Generar build optimizado para producción
-  output: 'standalone',
-  
-  // No usamos basePath para evitar problemas de rutas
-  basePath: '',
-  
-  // Configuración crítica para resolver errores 404
-  // Esto debería coincidir con la ubicación desde donde se servirán los archivos estáticos
-  assetPrefix: '/_next',
+  // Descomentar y ajustar si sirves desde una ruta que no es la raíz del dominio
+  // basePath: '',
+  // assetPrefix: '',
 
   /*  ───── Carga de imágenes remotas ───── */
   images: {
@@ -34,9 +28,13 @@ const nextConfig = {
     ],
     // Permite dominios para imágenes
     domains: ['cuyrdzzqlzibyketxrlk.supabase.co'],
-    // Deshabilitar la optimización para evitar problemas en producción
-    unoptimized: true,
   },
+
+  /*  ───── IMPORTANTE ─────
+      Si sirves desde un subdirectorio, usa:
+      basePath: '/tu-subdirectorio'
+      assetPrefix: '/tu-subdirectorio'
+  */
 };
 
 module.exports = nextConfig;

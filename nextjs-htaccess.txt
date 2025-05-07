@@ -1,0 +1,50 @@
+# Configuración Apache para Next.js
+# Colocar este archivo como .htaccess en el directorio raíz de la aplicación
+
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  
+  # Redirigir todo a través de HTTPS (descomenta si es necesario)
+  # RewriteCond %{HTTPS} !=on
+  # RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+  
+  # Permitir archivos estáticos de Next.js
+  # Esto garantiza que los archivos en _next/static/ se sirvan correctamente
+  RewriteRule ^_next/static/(.*)$ .next/static/$1 [L]
+  
+  # Gestionar solicitudes de imágenes
+  RewriteRule ^_next/image(.*)$ http://localhost:3000/_next/image$1 [P,L]
+  
+  # Si el archivo o directorio existe, servirlo directamente
+  RewriteCond %{REQUEST_FILENAME} -f [OR]
+  RewriteCond %{REQUEST_FILENAME} -d
+  RewriteRule ^ - [L]
+  
+  # Si no existe, redirigir todo a través del servidor Node.js
+  RewriteRule ^ http://localhost:3000%{REQUEST_URI} [P,L]
+  
+  # Asegurarse de que las cabeceras de proxy se manejen correctamente
+  ProxyPassReverse / http://localhost:3000/
+</IfModule>
+
+# Establecer encabezados para archivos estáticos
+<IfModule mod_headers.c>
+  # Cache para un año los recursos estáticos con hash
+  <FilesMatch "^.+\.[a-zA-Z0-9]{8,}\.(js|css)$">
+    Header set Cache-Control "public, max-age=31536000, immutable"
+  </FilesMatch>
+  
+  # Cache para una semana recursos estáticos sin hash
+  <FilesMatch "\.(ico|pdf|jpg|jpeg|png|gif|svg|js|css|ttf|woff|woff2)$">
+    Header set Cache-Control "public, max-age=604800"
+  </FilesMatch>
+</IfModule>
+
+# Deshabilitar la navegación de directorios
+Options -Indexes
+
+# Denegar acceso a archivos importantes
+<FilesMatch "(^\.env|package\.json|package-lock\.json|yarn\.lock)$">
+  Order allow,deny
+  Deny from all
+</FilesMatch> 

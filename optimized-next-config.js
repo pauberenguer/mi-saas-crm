@@ -11,16 +11,16 @@ const nextConfig = {
   poweredByHeader: false,
   compress: true,
   
-  /*  ───── Configura el entorno de producción ───── */
-  // Generar build optimizado para producción
+  /*  ───── Configuración crucial para assets ───── */
+  // Esta configuración garantiza que los assets se sirvan correctamente
   output: 'standalone',
   
-  // No usamos basePath para evitar problemas de rutas
-  basePath: '',
+  // Descomenta y ajusta estas líneas si tu aplicación no se sirve desde la raíz del dominio
+  // basePath: '/mi-saas-crm',
+  // assetPrefix: '/mi-saas-crm',
   
-  // Configuración crítica para resolver errores 404
-  // Esto debería coincidir con la ubicación desde donde se servirán los archivos estáticos
-  assetPrefix: '/_next',
+  // Alternativa: Si tienes un dominio estático para assets (CDN o subdominio)
+  // assetPrefix: 'https://static.tudominio.com',
 
   /*  ───── Carga de imágenes remotas ───── */
   images: {
@@ -34,9 +34,7 @@ const nextConfig = {
     ],
     // Permite dominios para imágenes
     domains: ['cuyrdzzqlzibyketxrlk.supabase.co'],
-    // Deshabilitar la optimización para evitar problemas en producción
-    unoptimized: true,
   },
 };
 
-module.exports = nextConfig;
+module.exports = nextConfig; 
