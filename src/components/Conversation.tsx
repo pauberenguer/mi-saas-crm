@@ -12,6 +12,7 @@ import {
   Trash2,
   Pause,
   Play,
+  Video,
 } from "lucide-react";
 
 interface ConversationProps {
@@ -66,6 +67,10 @@ export default function Conversation({
   const [selectedImages, setSelectedImages] = useState<File[]>([]);
   const [imagePreviews, setImagePreviews] = useState<string[]>([]);
 
+  // Vídeos
+  const [selectedVideos, setSelectedVideos] = useState<File[]>([]);
+  const [videoPreviews, setVideoPreviews] = useState<string[]>([]);
+
   // Bloqueo 24h
   const [isLocked, setIsLocked] = useState(false);
 
@@ -78,6 +83,7 @@ export default function Conversation({
   const menuRef = useRef<HTMLDivElement | null>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const pdfInputRef = useRef<HTMLInputElement>(null);
+  const videoInputRef = useRef<HTMLInputElement>(null);
 
   // Temporizador formateado
   const mins = String(Math.floor(elapsed / 60)).padStart(2, "0");
@@ -86,14 +92,15 @@ export default function Conversation({
   // Validación de envío
   const responderLocked = messageMode === "Responder" && isLocked;
   const canSend = messageMode === "Nota"
-    ? (newMessage.trim().length > 0 || selectedImages.length > 0)
+    ? (newMessage.trim().length > 0 || selectedImages.length > 0 || selectedVideos.length > 0)
     : isLocked
       ? selectedTpl !== null
       : !responderLocked && (
           paused ||
           selectedTpl !== null ||
           newMessage.trim().length > 0 ||
-          selectedImages.length > 0
+          selectedImages.length > 0 ||
+          selectedVideos.length > 0
         );
 
   // Origen del mensaje para additional_kwargs
@@ -141,6 +148,8 @@ export default function Conversation({
     setPaused(false);
     setSelectedImages([]);
     setImagePreviews([]);
+    setSelectedVideos([]);
+    setVideoPreviews([]);
     setElapsed(0);
     fetchMessages();
   }, [contactId]);
@@ -156,9 +165,7 @@ export default function Conversation({
         ({ new: row }) => setMessages(prev => [...prev, row])
       )
       .subscribe();
-    return () => {
-      supabase.removeChannel(chan);
-    };
+    return () => supabase.removeChannel(chan);
   }, [contactId]);
 
   // 4) Verificar bloqueo 24h
@@ -220,7 +227,7 @@ export default function Conversation({
   const handleImageChange = (e: ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
     files.forEach(file => {
-      if (!file.name.toLowerCase().endsWith(".jpeg")) return;
+      if (!/\.(jpe?g|png)$/i.test(file.name.toLowerCase())) return;
       const reader = new FileReader();
       reader.onload = ev => {
         const img = new Image();
@@ -250,7 +257,24 @@ export default function Conversation({
     setImagePreviews(prev => prev.filter((_, idx) => idx !== i));
   };
 
-  // 8) PDF
+  // 8) Vídeos + previsualización
+  const handleVideoClick = () => videoInputRef.current?.click();
+  const handleVideoChange = (e: ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    files.forEach(file => {
+      if (!file.name.toLowerCase().endsWith(".mp4")) return;
+      setSelectedVideos(prev => [...prev, file]);
+      setVideoPreviews(prev => [...prev, URL.createObjectURL(file)]);
+    });
+    if (videoInputRef.current) videoInputRef.current.value = "";
+  };
+  const removeVideoAt = (i: number) => {
+    URL.revokeObjectURL(videoPreviews[i]);
+    setSelectedVideos(prev => prev.filter((_, idx) => idx !== i));
+    setVideoPreviews(prev => prev.filter((_, idx) => idx !== i));
+  };
+
+  // 9) PDF
   const handlePdfClick = () => pdfInputRef.current?.click();
   const handlePdfChange = async (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -274,7 +298,6 @@ export default function Conversation({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ session_id: contactId, message: publicUrl, timestamp: new Date() }),
       }).catch(console.error);
-      // Pausar el contacto
       await supabase
         .from("contactos")
         .update({ is_paused: true })
@@ -282,7 +305,7 @@ export default function Conversation({
     }
   };
 
-  // 9) Grabación de audio
+  // 10) Grabación de audio
   const startRecording = async () => {
     canceledRef.current = false;
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -313,7 +336,6 @@ export default function Conversation({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ session_id: contactId, message: audioUrl, timestamp: new Date() }),
         }).catch(console.error);
-        // Pausar el contacto
         await supabase
           .from("contactos")
           .update({ is_paused: true })
@@ -351,7 +373,7 @@ export default function Conversation({
     }
   };
 
-  // 10) Enviar mensaje
+  // 11) Enviar mensaje
   const sendMessage = async () => {
     if (recording) { stopRecording(); return; }
 
@@ -372,7 +394,6 @@ export default function Conversation({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ plantilla: selectedTpl.name, session_id: contactId }),
         }).catch(console.error);
-        // Pausar el contacto
         await supabase
           .from("contactos")
           .update({ is_paused: true })
@@ -380,6 +401,38 @@ export default function Conversation({
         setSelectedTpl(null);
         setNewMessage("");
       }
+      return;
+    }
+
+    // Vídeos
+    if (selectedVideos.length > 0) {
+      for (const file of selectedVideos) {
+        const path = `${contactId}/${Date.now()}_${file.name}`;
+        await supabase.storage.from("conversaciones").upload(path, file);
+        const { data: urlData } = supabase.storage.from("conversaciones").getPublicUrl(path);
+        const publicUrl = urlData.publicUrl;
+        await supabase.from("conversaciones").insert([{
+          session_id: contactId,
+          message: {
+            type: "human",
+            content: publicUrl,
+            additional_kwargs: { origin: messageOrigin },
+            response_metadata: {},
+          },
+        }]);
+        if (messageMode === "Responder" && !isLocked) {
+          await fetch("https://n8n.asisttente.com/webhook/elglobobot", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ session_id: contactId, message: publicUrl, timestamp: new Date() }),
+          }).catch(console.error);
+          await supabase
+            .from("contactos")
+            .update({ is_paused: true })
+            .eq("session_id", contactId);
+        }
+      }
+      setSelectedVideos([]); setVideoPreviews([]); setNewMessage("");
       return;
     }
 
@@ -405,14 +458,13 @@ export default function Conversation({
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ session_id: contactId, message: publicUrl, timestamp: new Date() }),
           }).catch(console.error);
-          // Pausar el contacto
           await supabase
             .from("contactos")
             .update({ is_paused: true })
             .eq("session_id", contactId);
         }
       }
-      setSelectedImages([]);         setImagePreviews([]);         setNewMessage("");
+      setSelectedImages([]); setImagePreviews([]); setNewMessage("");
       return;
     }
 
@@ -433,14 +485,13 @@ export default function Conversation({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ session_id: contactId, message: newMessage.trim(), timestamp: new Date() }),
       }).catch(console.error);
-      // Pausar el contacto
       await supabase
         .from("contactos")
         .update({ is_paused: true })
         .eq("session_id", contactId);
     }
     if (selectedTpl) {
-      await fetch("https://n8n.asisttente.com/webhook/elgloboenviarplantilla", {
+      await fetch("https://n8n.asisttente.com/webhook/elglobobo enviarplantilla", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ plantilla: selectedTpl.name, session_id: contactId }),
@@ -453,14 +504,28 @@ export default function Conversation({
   return (
     <div className="flex flex-col h-full" ref={menuRef}>
       {/* Inputs ocultos */}
-      <input ref={pdfInputRef} type="file" accept="application/pdf" className="hidden" onChange={handlePdfChange} />
+      <input
+        ref={pdfInputRef}
+        type="file"
+        accept="application/pdf"
+        className="hidden"
+        onChange={handlePdfChange}
+      />
       <input
         ref={imageInputRef}
         type="file"
-        accept=".jpeg"
+        accept=".jpeg,.jpg,.png"
         multiple
         className="hidden"
         onChange={handleImageChange}
+      />
+      <input
+        ref={videoInputRef}
+        type="file"
+        accept=".mp4"
+        multiple
+        className="hidden"
+        onChange={handleVideoChange}
       />
 
       {/* Conversación */}
@@ -471,11 +536,12 @@ export default function Conversation({
           const origin = m.additional_kwargs?.origin;
           const isCust = m.type === "human" && !origin;
           const content = (m.content || "").trim();
-          const isImg = /\.(jpe?g)$/i.test(content);
+          const isImg = /\.(jpe?g|png)$/i.test(content);
           const isPdf = /\.pdf$/i.test(content);
           const isAud = /\.(ogg|mp3|wav|webm)$/i.test(content);
+          const isVid = /\.mp4$/i.test(content);
           const disp = origin === "crm" ? "member" : origin === "note" ? "nota" : m.type;
-          const style = (isImg || isPdf || isAud) ? getMessageStyle("human") : getMessageStyle(disp);
+          const style = (isImg || isPdf || isAud || isVid) ? getMessageStyle("human") : getMessageStyle(disp);
 
           return (
             <div
@@ -486,7 +552,9 @@ export default function Conversation({
                 <img src="/avatar-placeholder.png" alt="Cliente" className="w-8 h-8 rounded-full object-cover" />
               )}
               <div className="inline-block rounded-3xl px-3 py-2 max-w-[80%] break-words" style={style}>
-                {isImg && <img src={content} alt="Imagen" className="w-60 h-80 object-cover rounded-lg" />}
+                {isImg && (
+                  <img src={content} alt="Imagen" className="w-60 h-80 object-cover rounded-lg" />
+                )}
                 {isPdf && <span className="text-black">PDF</span>}
                 {isAud && (
                   <audio controls className="w-full mt-1">
@@ -503,7 +571,13 @@ export default function Conversation({
                     Tu navegador no soporta reproducción de audio.
                   </audio>
                 )}
-                {!isImg && !isPdf && !isAud && <p>{m.content}</p>}
+                {isVid && (
+                  <video controls className="w-60 h-80 object-cover rounded-lg">
+                    <source src={content} type="video/mp4" />
+                    Tu navegador no soporta reproducción de video.
+                  </video>
+                )}
+                {!isImg && !isPdf && !isAud && !isVid && <p>{m.content}</p>}
               </div>
               {!isCust && (
                 <img
@@ -520,8 +594,7 @@ export default function Conversation({
                 {ts}
               </span>
             </div>
-          );
-        })}
+        );})}
         <div ref={messagesEndRef} />
       </div>
 
@@ -590,7 +663,7 @@ export default function Conversation({
               messageMode === "Nota" ? "bg-[#fdf0d0]" : "bg-white"
             } ${(recording || (responderLocked && !selectedTpl)) ? "opacity-50" : ""}`}
             placeholder={
-              messageMode === "Responder" && imagePreviews.length > 0
+              messageMode === "Responder" && (imagePreviews.length > 0 || videoPreviews.length > 0)
                 ? ""
                 : messageMode === "Nota"
                   ? "Deja una nota..."
@@ -607,13 +680,24 @@ export default function Conversation({
             }}
             onKeyDown={e => e.key === "Enter" && canSend && sendMessage()}
           />
-          {messageMode === "Responder" && imagePreviews.length > 0 && (
+          {messageMode === "Responder" && (imagePreviews.length > 0 || videoPreviews.length > 0) && (
             <div className="absolute top-0 left-0 h-full flex items-center space-x-2 pl-2">
               {imagePreviews.map((src, idx) => (
-                <div key={idx} className="relative w-10 h-10">
+                <div key={`img-${idx}`} className="relative w-10 h-10">
                   <img src={src} alt={`preview-${idx}`} className="w-10 h-10 object-cover rounded" />
                   <button
                     onClick={() => removeImageAt(idx)}
+                    className="absolute -top-1 -right-1 w-4 h-4 flex items-center justify-center bg-black text-white rounded-full text-xs"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+              {videoPreviews.map((src, idx) => (
+                <div key={`vid-${idx}`} className="relative w-10 h-10">
+                  <video src={src} muted loop className="w-10 h-10 object-cover rounded" />
+                  <button
+                    onClick={() => removeVideoAt(idx)}
                     className="absolute -top-1 -right-1 w-4 h-4 flex items-center justify-center bg-black text-white rounded-full text-xs"
                   >
                     ×
@@ -624,19 +708,30 @@ export default function Conversation({
           )}
         </div>
 
-        {/* Clip, imagen y micro */}
+        {/* Clip, imagen, vídeo y micro */}
         {messageMode !== "Nota" && !responderLocked && !recording && (
           <>
-            <button onClick={handlePdfClick} className="p-1"><Paperclip size={20} color="#818b9c" /></button>
-            <button onClick={handleImageClick} className="p-1"><ImageIcon size={20} color="#818b9c" /></button>
-            <button onClick={handleMicClick} className="p-1"><Mic size={20} color="#818b9c" /></button>
+            <button onClick={handlePdfClick} className="p-1">
+              <Paperclip size={20} color="#818b9c" />
+            </button>
+            <button onClick={handleImageClick} className="p-1">
+              <ImageIcon size={20} color="#818b9c" />
+            </button>
+            <button onClick={handleVideoClick} className="p-1">
+              <Video size={20} color="#818b9c" />
+            </button>
+            <button onClick={handleMicClick} className="p-1">
+              <Mic size={20} color="#818b9c" />
+            </button>
           </>
         )}
 
         {/* Durante grabación */}
         {!responderLocked && recording && (
           <>
-            <button onClick={cancelRecording} className="p-1"><Trash2 size={20} color="#818b9c" /></button>
+            <button onClick={cancelRecording} className="p-1">
+              <Trash2 size={20} color="#818b9c" />
+            </button>
             <button onClick={handlePauseClick} className="p-1">
               {paused ? <Play size={20} color="#818b9c" /> : <Pause size={20} color="#818b9c" />}
             </button>
