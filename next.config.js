@@ -1,41 +1,48 @@
-/** @type {import('next').NextConfig} */
+/**
+ * @type {import('next').NextConfig}
+ *
+ * Configuración central de Next 15 para “mi-saas-crm”
+ * — React Strict, ajustes de producción y alias «@/» →
+ *   <raíz>/src  (para que Webpack resuelva imports "@/…")
+ */
+
+const path = require('path');
+
 const nextConfig = {
-  /*  ───── Comportamiento de React/Next ───── */
+  /* ───── Comportamiento de React/Next ───── */
   reactStrictMode: true,
 
-  /*  ───── Linter y TypeScript en CI ───── */
+  /* ───── Linter y TypeScript en CI ───── */
   eslint:     { ignoreDuringBuilds: true },
   typescript: { ignoreBuildErrors: true },
 
-  /*  ───── Optimizaciones para producción ───── */
+  /* ───── Optimizaciones para producción ───── */
   poweredByHeader: false,
   compress: true,
-  
-  /*  ───── Configura el entorno de producción ───── */
-  // Generar build optimizado para producción
-  output: 'standalone',
-  
-  // No usamos basePath para evitar problemas de rutas
-  basePath: '',
-  
-  // Configuración crítica para resolver errores 404
-  // Esto debería coincidir con la ubicación desde donde se servirán los archivos estáticos
-  assetPrefix: '/_next',
 
-  /*  ───── Carga de imágenes remotas ───── */
+  /* ───── Configura el entorno de producción ───── */
+  output: 'standalone',   // genera build independiente
+  basePath: '',           // sin prefijo de rutas
+  assetPrefix: '/_next',  // ruta estática que sirve Nginx
+
+  /* ───── Alias “@/” para Webpack (Next 15 no lo crea) ───── */
+  webpack: (config) => {
+    // "@/utils/…" → /var/www/mi-saas-crm/src/utils/…
+    config.resolve.alias['@'] = path.resolve(__dirname, 'src');
+    return config;
+  },
+
+  /* ───── Carga de imágenes remotas ───── */
   images: {
     remotePatterns: [
       {
         protocol: 'https',
         hostname: 'cuyrdzzqlzibyketxrlk.supabase.co',
-        port: '',
         pathname: '/storage/v1/object/public/avatars/**',
       },
     ],
-    // Permite dominios para imágenes
     domains: ['cuyrdzzqlzibyketxrlk.supabase.co'],
-    // Deshabilitar la optimización para evitar problemas en producción
-    unoptimized: true,
+    unoptimized: true, // evita problemas de optimización en prod
   },
 };
 
