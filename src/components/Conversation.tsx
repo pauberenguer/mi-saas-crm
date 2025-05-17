@@ -1,9 +1,10 @@
+// src/components/Conversation.tsx
 "use client";
 
-import React from "react";
-import { useState, useEffect, useRef, ChangeEvent } from "react";
+import React, { useState, useEffect, useRef, ChangeEvent } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/utils/supabaseClient";
+import imageCompression from "browser-image-compression";
 import {
   Image as ImageIcon,
   Paperclip,
@@ -39,6 +40,27 @@ const getMessageStyle = (type: string) => {
   return {};
 };
 
+// ============================================================================
+// Función para convertir Blob .webm a Blob .ogg/opus con ffmpeg.wasm import dinámico
+// ============================================================================
+async function convertWebmToOgg(webmBlob: Blob): Promise<Blob> {
+  const { createFFmpeg, fetchFile } = await import("@ffmpeg/ffmpeg");
+  const ffmpeg = createFFmpeg({ log: false });
+  await ffmpeg.load();
+  ffmpeg.FS("writeFile", "input.webm", await fetchFile(webmBlob));
+  await ffmpeg.run(
+    "-i", "input.webm",
+    "-c:a", "libopus",
+    "-b:a", "64k",
+    "output.ogg"
+  );
+  const data = ffmpeg.FS("readFile", "output.ogg");
+  return new Blob([data.buffer], { type: "audio/ogg; codecs=opus" });
+}
+
+// ============================================================================
+// Componente Conversation
+// ============================================================================
 export default function Conversation({
   contactId,
   messageMode,
@@ -54,6 +76,9 @@ export default function Conversation({
   const [recording, setRecording] = useState(false);
   const [paused, setPaused] = useState(false);
   const [elapsed, setElapsed] = useState(0);
+
+  // Flag para omitir el siguiente mensaje human tras un AI con etiqueta fotos:true
+  const skipNextHumanRef = useRef(false);
 
   // Avatar propio
   const [ownAvatarUrl, setOwnAvatarUrl] = useState<string | null>(null);
@@ -71,6 +96,10 @@ export default function Conversation({
   const [selectedVideos, setSelectedVideos] = useState<File[]>([]);
   const [videoPreviews, setVideoPreviews] = useState<string[]>([]);
 
+  // Documentos (PDF, DOC, DOCX)
+  const [selectedDocs, setSelectedDocs] = useState<File[]>([]);
+  const [docPreviews, setDocPreviews] = useState<string[]>([]);
+
   // Bloqueo 24h
   const [isLocked, setIsLocked] = useState(false);
 
@@ -82,7 +111,7 @@ export default function Conversation({
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
-  const pdfInputRef = useRef<HTMLInputElement>(null);
+  const docInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
 
   // Temporizador formateado
@@ -92,7 +121,7 @@ export default function Conversation({
   // Validación de envío
   const responderLocked = messageMode === "Responder" && isLocked;
   const canSend = messageMode === "Nota"
-    ? (newMessage.trim().length > 0 || selectedImages.length > 0 || selectedVideos.length > 0)
+    ? (newMessage.trim().length > 0 || selectedImages.length > 0 || selectedVideos.length > 0 || selectedDocs.length > 0)
     : isLocked
       ? selectedTpl !== null
       : !responderLocked && (
@@ -100,13 +129,16 @@ export default function Conversation({
           selectedTpl !== null ||
           newMessage.trim().length > 0 ||
           selectedImages.length > 0 ||
-          selectedVideos.length > 0
+          selectedVideos.length > 0 ||
+          selectedDocs.length > 0
         );
 
   // Origen del mensaje para additional_kwargs
   const messageOrigin = messageMode === "Nota" ? "note" : "crm";
 
+  // ==========================================================================
   // 1) Obtener avatar y plantillas
+  // ==========================================================================
   useEffect(() => {
     supabase.auth.getUser()
       .then(({ data: { user } }) => {
@@ -129,7 +161,9 @@ export default function Conversation({
       });
   }, []);
 
+  // ==========================================================================
   // 2) Fetch inicial de mensajes
+  // ==========================================================================
   const fetchMessages = async () => {
     const { data, error } = await supabase
       .from("conversaciones")
@@ -150,11 +184,16 @@ export default function Conversation({
     setImagePreviews([]);
     setSelectedVideos([]);
     setVideoPreviews([]);
+    setSelectedDocs([]);
+    setDocPreviews([]);
     setElapsed(0);
+    skipNextHumanRef.current = false;
     fetchMessages();
   }, [contactId]);
 
-  // 3) Suscripción realtime
+  // ==========================================================================
+  // 3) Suscripción realtime con lógica de omisión de un mensaje human
+  // ==========================================================================
   useEffect(() => {
     if (!contactId) return;
     const chan = supabase
@@ -162,13 +201,31 @@ export default function Conversation({
       .on(
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "conversaciones", filter: `session_id=eq.${contactId}` },
-        ({ new: row }) => setMessages(prev => [...prev, row])
+        ({ new: row }) => {
+          try {
+            const m = typeof row.message === "string" ? JSON.parse(row.message) : row.message;
+            if (m.type === "ai" && m.etiquetas?.fotos) {
+              skipNextHumanRef.current = true;
+              setMessages(prev => [...prev, row]);
+            } else if (m.type === "human" && skipNextHumanRef.current) {
+              skipNextHumanRef.current = false;
+            } else {
+              setMessages(prev => [...prev, row]);
+            }
+          } catch {
+            setMessages(prev => [...prev, row]);
+          }
+        }
       )
       .subscribe();
-    return () => supabase.removeChannel(chan);
+    return () => {
+      supabase.removeChannel(chan);
+    };
   }, [contactId]);
 
+  // ==========================================================================
   // 4) Verificar bloqueo 24h
+  // ==========================================================================
   useEffect(() => {
     let timer: ReturnType<typeof setInterval>;
     const checkLock = async () => {
@@ -192,12 +249,16 @@ export default function Conversation({
     return () => clearInterval(timer);
   }, [contactId]);
 
+  // ==========================================================================
   // 5) Scroll automático
+  // ==========================================================================
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  // ==========================================================================
   // 6) Seleccionar plantilla
+  // ==========================================================================
   const handleSelectTemplate = async (tpl: TemplateItem) => {
     const { data, error } = await supabase
       .from("plantillas")
@@ -210,8 +271,6 @@ export default function Conversation({
       setTplMenuOpen(false);
     }
   };
-
-  // Cerrar menú plantilla al click fuera
   useEffect(() => {
     const onClickOutside = (e: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
@@ -222,12 +281,18 @@ export default function Conversation({
     return () => document.removeEventListener("mousedown", onClickOutside);
   }, []);
 
-  // 7) Imágenes + previsualización
+  // ==========================================================================
+  // 7) Imágenes + previsualización (solo .png/.jpg/.jpeg ≤ 25MB)
+  // ==========================================================================
   const handleImageClick = () => imageInputRef.current?.click();
   const handleImageChange = (e: ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
     files.forEach(file => {
       if (!/\.(jpe?g|png)$/i.test(file.name.toLowerCase())) return;
+      if (file.size > 25 * 1024 * 1024) {
+        alert(`El archivo "${file.name}" supera 25 MB y no puede seleccionarse.`);
+        return;
+      }
       const reader = new FileReader();
       reader.onload = ev => {
         const img = new Image();
@@ -257,7 +322,9 @@ export default function Conversation({
     setImagePreviews(prev => prev.filter((_, idx) => idx !== i));
   };
 
+  // ==========================================================================
   // 8) Vídeos + previsualización
+  // ==========================================================================
   const handleVideoClick = () => videoInputRef.current?.click();
   const handleVideoChange = (e: ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
@@ -274,62 +341,86 @@ export default function Conversation({
     setVideoPreviews(prev => prev.filter((_, idx) => idx !== i));
   };
 
-  // 9) PDF
-  const handlePdfClick = () => pdfInputRef.current?.click();
-  const handlePdfChange = async (e: ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !file.name.toLowerCase().endsWith(".pdf")) return;
-    const path = `${contactId}/${Date.now()}_${file.name}`;
-    await supabase.storage.from("conversaciones").upload(path, file);
-    const { data: urlData } = supabase.storage.from("conversaciones").getPublicUrl(path);
-    const publicUrl = urlData.publicUrl;
-    await supabase.from("conversaciones").insert([{
-      session_id: contactId,
-      message: {
-        type: "human",
-        content: publicUrl,
-        additional_kwargs: { origin: "crm" },
-        response_metadata: {},
-      },
-    }]);
-    if (messageMode === "Responder" && !selectedTpl && !isLocked) {
-      await fetch("https://n8n.asisttente.com/webhook/elglobobot", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ session_id: contactId, message: publicUrl, timestamp: new Date() }),
-      }).catch(console.error);
-      await supabase
-        .from("contactos")
-        .update({ is_paused: true })
-        .eq("session_id", contactId);
-    }
+  // ==========================================================================
+  // 9) Documentos (PDF, DOC, DOCX) + previsualización
+  // ==========================================================================
+  const handleFileClick = () => docInputRef.current?.click();
+  const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    files.forEach(file => {
+      if (!/\.(pdf|docx?)$/i.test(file.name.toLowerCase())) return;
+      setSelectedDocs(prev => [...prev, file]);
+      setDocPreviews(prev => [...prev, URL.createObjectURL(file)]);
+    });
+    if (docInputRef.current) docInputRef.current.value = "";
+  };
+  const removeDocAt = (i: number) => {
+    URL.revokeObjectURL(docPreviews[i]);
+    setSelectedDocs(prev => prev.filter((_, idx) => idx !== i));
+    setDocPreviews(prev => prev.filter((_, idx) => idx !== i));
   };
 
-  // 10) Grabación de audio
+  // ==========================================================================
+  // 10) Grabación de audio + envío con contentType correcto
+  // ==========================================================================
   const startRecording = async () => {
     canceledRef.current = false;
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    const options = { mimeType: "audio/webm" };
+    const oggMime = "audio/ogg; codecs=opus";
+    const supportsOgg = MediaRecorder.isTypeSupported(oggMime);
+    const options = supportsOgg
+      ? { mimeType: oggMime }
+      : { mimeType: "audio/webm" };
+
     const mr = new MediaRecorder(stream, options);
     recordedChunksRef.current = [];
-    mr.ondataavailable = e => { if (e.data.size) recordedChunksRef.current.push(e.data); };
+
+    mr.ondataavailable = e => {
+      if (e.data.size) recordedChunksRef.current.push(e.data);
+    };
+
     mr.onstop = async () => {
-      if (canceledRef.current) { canceledRef.current = false; return; }
-      const blob = new Blob(recordedChunksRef.current, { type: "audio/webm" });
-      const file = new File([blob], `audio_${Date.now()}.webm`, { type: "audio/webm" });
+      if (canceledRef.current) {
+        canceledRef.current = false;
+        return;
+      }
+
+      let finalBlob: Blob;
+      if (supportsOgg) {
+        finalBlob = new Blob(recordedChunksRef.current, { type: oggMime });
+      } else {
+        const webmBlob = new Blob(recordedChunksRef.current, { type: "audio/webm" });
+        try {
+          finalBlob = await convertWebmToOgg(webmBlob);
+        } catch {
+          finalBlob = webmBlob;
+        }
+      }
+
+      const fileName = `audio_${Date.now()}.ogg`;
+      const file = new File([finalBlob], fileName, { type: finalBlob.type });
+
+      // Aquí indicamos contentType para que Supabase guarde metadata correcta
       const path = `${contactId}/${Date.now()}_${file.name}`;
-      await supabase.storage.from("conversaciones").upload(path, file);
+      await supabase
+        .storage
+        .from("conversaciones")
+        .upload(path, file, { contentType: file.type });
+
       const { data: urlData } = supabase.storage.from("conversaciones").getPublicUrl(path);
       const audioUrl = urlData.publicUrl;
+
       await supabase.from("conversaciones").insert([{
         session_id: contactId,
         message: {
           type: "human",
           content: audioUrl,
+          etiquetas: { audio: true },
           additional_kwargs: { origin: "crm" },
           response_metadata: {},
         },
       }]);
+
       if (messageMode === "Responder" && !selectedTpl && !isLocked) {
         await fetch("https://n8n.asisttente.com/webhook/elglobobot", {
           method: "POST",
@@ -341,10 +432,12 @@ export default function Conversation({
           .update({ is_paused: true })
           .eq("session_id", contactId);
       }
+
       setRecording(false);
       setPaused(false);
       intervalRef.current && clearInterval(intervalRef.current);
     };
+
     mediaRecorderRef.current = mr;
     mr.start();
     setRecording(true);
@@ -365,19 +458,26 @@ export default function Conversation({
   const handlePauseClick = () => {
     if (!mediaRecorderRef.current) return;
     if (paused) {
-      mediaRecorderRef.current.resume(); setPaused(false);
+      mediaRecorderRef.current.resume();
+      setPaused(false);
       intervalRef.current = window.setInterval(() => setElapsed(x => x + 1), 1000);
     } else {
-      mediaRecorderRef.current.pause(); setPaused(true);
+      mediaRecorderRef.current.pause();
+      setPaused(true);
       intervalRef.current && clearInterval(intervalRef.current);
     }
   };
 
-  // 11) Enviar mensaje
+  // ==========================================================================
+  // 11) Enviar mensaje (imágenes, vídeos, docs, texto)
+  // ==========================================================================
   const sendMessage = async () => {
-    if (recording) { stopRecording(); return; }
+    if (recording) {
+      stopRecording();
+      return;
+    }
 
-    // Modo bloqueado >24h → plantilla
+    // -- Bloqueado (>24h) → Plantilla
     if (responderLocked) {
       if (selectedTpl) {
         await supabase.from("conversaciones").insert([{
@@ -404,7 +504,7 @@ export default function Conversation({
       return;
     }
 
-    // Vídeos
+    // -- Vídeos
     if (selectedVideos.length > 0) {
       for (const file of selectedVideos) {
         const path = `${contactId}/${Date.now()}_${file.name}`;
@@ -436,9 +536,16 @@ export default function Conversation({
       return;
     }
 
-    // Imágenes
+    // -- Imágenes (compresión si >5MB)
     if (selectedImages.length > 0) {
-      for (const file of selectedImages) {
+      for (let file of selectedImages) {
+        if (file.size > 5 * 1024 * 1024) {
+          const options = { maxSizeMB: 1, maxWidthOrHeight: 1024, useWebWorker: true };
+          try {
+            const compressedBlob = await imageCompression(file, options);
+            file = new File([compressedBlob], file.name, { type: compressedBlob.type });
+          } catch {}
+        }
         const path = `${contactId}/${Date.now()}_${file.name}`;
         await supabase.storage.from("conversaciones").upload(path, file);
         const { data: urlData } = supabase.storage.from("conversaciones").getPublicUrl(path);
@@ -468,7 +575,39 @@ export default function Conversation({
       return;
     }
 
-    // Texto / plantilla normal
+    // -- Documentos
+    if (selectedDocs.length > 0) {
+      for (const file of selectedDocs) {
+        const path = `${contactId}/${Date.now()}_${file.name}`;
+        await supabase.storage.from("conversaciones").upload(path, file);
+        const { data: urlData } = supabase.storage.from("conversaciones").getPublicUrl(path);
+        const publicUrl = urlData.publicUrl;
+        await supabase.from("conversaciones").insert([{
+          session_id: contactId,
+          message: {
+            type: "human",
+            content: publicUrl,
+            additional_kwargs: { origin: messageOrigin },
+            response_metadata: {},
+          },
+        }]);
+        if (messageMode === "Responder" && !isLocked) {
+          await fetch("https://n8n.asisttente.com/webhook/elglobobot", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ session_id: contactId, message: publicUrl, timestamp: new Date() }),
+          }).catch(console.error);
+          await supabase
+            .from("contactos")
+            .update({ is_paused: true })
+            .eq("session_id", contactId);
+        }
+      }
+      setSelectedDocs([]); setDocPreviews([]); setNewMessage("");
+      return;
+    }
+
+    // -- Texto / plantilla normal
     if (!newMessage.trim() && !selectedTpl) return;
     await supabase.from("conversaciones").insert([{
       session_id: contactId,
@@ -491,7 +630,7 @@ export default function Conversation({
         .eq("session_id", contactId);
     }
     if (selectedTpl) {
-      await fetch("https://n8n.asisttente.com/webhook/elglobobo enviarplantilla", {
+      await fetch("https://n8n.asisttente.com/webhook/elgloboboenviarplantilla", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ plantilla: selectedTpl.name, session_id: contactId }),
@@ -505,11 +644,12 @@ export default function Conversation({
     <div className="flex flex-col h-full" ref={menuRef}>
       {/* Inputs ocultos */}
       <input
-        ref={pdfInputRef}
+        ref={docInputRef}
         type="file"
-        accept="application/pdf"
+        accept=".pdf,.doc,.docx"
+        multiple
         className="hidden"
-        onChange={handlePdfChange}
+        onChange={handleFileChange}
       />
       <input
         ref={imageInputRef}
@@ -531,17 +671,23 @@ export default function Conversation({
       {/* Conversación */}
       <div className="h-[568px] overflow-y-auto p-4 mb-2">
         {messages.map(msg => {
-          const m = typeof msg.message === "string" ? JSON.parse(msg.message) : msg.message;
+          const m = typeof msg.message === "string" ? JSON.parse(msg.message) : msg.
+          message;
           const ts = msg.created_at ? new Date(msg.created_at).toLocaleString() : "";
           const origin = m.additional_kwargs?.origin;
           const isCust = m.type === "human" && !origin;
           const content = (m.content || "").trim();
+
           const isImg = /\.(jpe?g|png)$/i.test(content);
-          const isPdf = /\.pdf$/i.test(content);
-          const isAud = /\.(ogg|mp3|wav|webm)$/i.test(content);
-          const isVid = /\.mp4$/i.test(content);
+          const isPdf = /\.pdf(\?.*)?$/i.test(content);
+          const isDoc = /\.(docx?|DOCX?)(\?.*)?$/i.test(content);
+          const isAud = m.etiquetas?.audio === true || /\.(ogg|mp3|wav|webm)(\?.*)?$/i.test(content);
+          const isVid = /\.mp4(\?.*)?$/i.test(content);
+
           const disp = origin === "crm" ? "member" : origin === "note" ? "nota" : m.type;
-          const style = (isImg || isPdf || isAud || isVid) ? getMessageStyle("human") : getMessageStyle(disp);
+          const style = (isImg || isPdf || isDoc || isAud || isVid)
+            ? getMessageStyle("human")
+            : getMessageStyle(disp);
 
           return (
             <div
@@ -555,21 +701,44 @@ export default function Conversation({
                 {isImg && (
                   <img src={content} alt="Imagen" className="w-60 h-80 object-cover rounded-lg" />
                 )}
-                {isPdf && <span className="text-black">PDF</span>}
+                {isPdf && (
+                  <a
+                    href={content}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="block mt-1 text-sm underline text-blue-600"
+                  >
+                    {content.split("/").pop()}
+                  </a>
+                )}
+                {isDoc && (
+                  <a
+                    href={content}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="block mt-1 text-sm underline text-blue-600"
+                  >
+                    {content.split("/").pop()}
+                  </a>
+                )}
                 {isAud && (
-                  <audio controls className="w-full mt-1">
-                    <source
+                  <>
+                    <audio
+                      controls
+                      preload="metadata"
                       src={content}
-                      type={
-                        content.endsWith(".mp3") ? "audio/mpeg" :
-                        content.endsWith(".wav") ? "audio/wav" :
-                        content.endsWith(".ogg") ? "audio/ogg" :
-                        content.endsWith(".webm") ? "audio/webm" :
-                        "audio/*"
-                      }
+                      crossOrigin="anonymous"
+                      className="w-full"
                     />
-                    Tu navegador no soporta reproducción de audio.
-                  </audio>
+                    <a
+                      href={content}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="block mt-1 text-sm underline text-blue-600"
+                    >
+                      Descargar audio
+                    </a>
+                  </>
                 )}
                 {isVid && (
                   <video controls className="w-60 h-80 object-cover rounded-lg">
@@ -577,7 +746,7 @@ export default function Conversation({
                     Tu navegador no soporta reproducción de video.
                   </video>
                 )}
-                {!isImg && !isPdf && !isAud && !isVid && <p>{m.content}</p>}
+                {!isImg && !isPdf && !isDoc && !isAud && !isVid && <p>{m.content}</p>}
               </div>
               {!isCust && (
                 <img
@@ -602,17 +771,13 @@ export default function Conversation({
       <div className="mt-auto mb-2 flex gap-2">
         <button
           onClick={() => setMessageMode("Responder")}
-          className={`flex-1 text-sm ${
-            messageMode === "Responder" ? "border-b-2 border-[#0084ff] font-bold" : "font-medium text-gray-600"
-          }`}
+          className={`flex-1 text-sm ${messageMode === "Responder" ? "border-b-2 border-[#0084ff] font-bold" : "font-medium text-gray-600"}`}
         >
           Responder
         </button>
         <button
           onClick={() => setMessageMode("Nota")}
-          className={`flex-1 text-sm ${
-            messageMode === "Nota" ? "border-b-2 border-[#0084ff] font-bold" : "font-medium text-gray-600"
-          }`}
+          className={`flex-1 text-sm ${messageMode === "Nota" ? "border-b-2 border-[#0084ff] font-bold" : "font-medium text-gray-600"}`}
         >
           Nota
         </button>
@@ -620,18 +785,14 @@ export default function Conversation({
 
       {/* Controles + input */}
       <div className="mt-2 flex items-center space-x-4 relative">
-        {/* Plantillas */}
         {messageMode !== "Nota" && (
-          <button className="p-1" onClick={() => setTplMenuOpen(o => !o)}>
-            <FileText size={20} color="#818b9c" />
-          </button>
+          <button className="p-1" onClick={() => setTplMenuOpen(o => !o)}><FileText size={20} color="#818b9c"/></button>
         )}
         {messageMode !== "Nota" && tplMenuOpen && (
           <div className="absolute bottom-full left-0 mb-2 w-64 max-h-60 overflow-y-auto bg-white divide-y divide-gray-100 rounded-lg shadow-lg z-10">
-            {templatesList.length === 0 ? (
-              <div className="p-4 text-sm text-gray-500">No hay plantillas.</div>
-            ) : (
-              templatesList.map(tpl => (
+            {templatesList.length === 0
+              ? <div className="p-4 text-sm text-gray-500">No hay plantillas.</div>
+              : templatesList.map(tpl => (
                 <button
                   key={tpl.name}
                   className="w-full text-left px-4 py-2 hover:bg-gray-50"
@@ -641,31 +802,25 @@ export default function Conversation({
                   <div className="text-xs text-gray-500">{tpl.category} • {tpl.language}</div>
                 </button>
               ))
-            )}
+            }
             <button
               className="w-full px-4 py-2 text-center text-sm text-blue-600 hover:bg-gray-50"
-              onClick={() => {
-                setTplMenuOpen(false);
-                router.push("/configuracion/whatsapp");
-              }}
+              onClick={() => { setTplMenuOpen(false); router.push("/configuracion/whatsapp"); }}
             >
               Ver Plantillas
             </button>
           </div>
         )}
 
-        {/* Campo texto */}
         <div className="relative flex-1">
           <input
             type="text"
             disabled={responderLocked || recording}
-            className={`w-full p-3 rounded focus:outline-none ${
-              messageMode === "Nota" ? "bg-[#fdf0d0]" : "bg-white"
-            } ${(recording || (responderLocked && !selectedTpl)) ? "opacity-50" : ""}`}
+            className={`w-full p-3 rounded focus:outline-none ${messageMode==="Nota" ? "bg-[#fdf0d0]" : "bg-white"} ${(recording || (responderLocked && !selectedTpl)) ? "opacity-50":""}`}
             placeholder={
-              messageMode === "Responder" && (imagePreviews.length > 0 || videoPreviews.length > 0)
+              messageMode==="Responder" && (imagePreviews.length>0||videoPreviews.length>0||docPreviews.length>0)
                 ? ""
-                : messageMode === "Nota"
+                : messageMode==="Nota"
                   ? "Deja una nota..."
                   : responderLocked
                     ? "Han pasado más de 24h, selecciona plantilla..."
@@ -674,85 +829,62 @@ export default function Conversation({
                       : "Responde aquí"
             }
             value={newMessage}
-            onChange={e => {
-              setNewMessage(e.target.value);
-              if (selectedTpl) setSelectedTpl(null);
-            }}
-            onKeyDown={e => e.key === "Enter" && canSend && sendMessage()}
+            onChange={e=>{ setNewMessage(e.target.value); if(selectedTpl) setSelectedTpl(null); }}
+            onKeyDown={e=> e.key==="Enter" && canSend && sendMessage()}
           />
-          {messageMode === "Responder" && (imagePreviews.length > 0 || videoPreviews.length > 0) && (
+          {messageMode==="Responder" && (imagePreviews.length>0||videoPreviews.length>0||docPreviews.length>0) && (
             <div className="absolute top-0 left-0 h-full flex items-center space-x-2 pl-2">
-              {imagePreviews.map((src, idx) => (
+              {imagePreviews.map((src,idx)=>(
+
                 <div key={`img-${idx}`} className="relative w-10 h-10">
-                  <img src={src} alt={`preview-${idx}`} className="w-10 h-10 object-cover rounded" />
-                  <button
-                    onClick={() => removeImageAt(idx)}
-                    className="absolute -top-1 -right-1 w-4 h-4 flex items-center justify-center bg-black text-white rounded-full text-xs"
-                  >
-                    ×
-                  </button>
+                  <img src={src} alt={`preview-${idx}`} className="w-10 h-10 object-cover rounded"/>
+                  <button onClick={()=>removeImageAt(idx)} className="absolute -top-1 -right-1 w-4 h-4 flex items-center justify-center bg-black text-white rounded-full text-xs">×</button>
                 </div>
               ))}
-              {videoPreviews.map((src, idx) => (
+              {videoPreviews.map((src,idx)=>(
+
                 <div key={`vid-${idx}`} className="relative w-10 h-10">
-                  <video src={src} muted loop className="w-10 h-10 object-cover rounded" />
-                  <button
-                    onClick={() => removeVideoAt(idx)}
-                    className="absolute -top-1 -right-1 w-4 h-4 flex items-center justify-center bg-black text-white rounded-full text-xs"
-                  >
-                    ×
-                  </button>
+                  <video src={src} muted loop className="w-10 h-10 object-cover rounded"/>
+                  <button onClick={()=>removeVideoAt(idx)} className="absolute -top-1 -right-1 w-4 h-4 flex items-center justify-center bg-black text-white rounded-full text-xs">×</button>
+                </div>
+              ))}
+              {docPreviews.map((src,idx)=>(
+
+                <div key={`doc-${idx}`} className="relative flex items-center space-x-1">
+                  <FileText size={18} color="#818b9c"/>
+                  <a href={src} target="_blank" rel="noopener noreferrer" className="text-xs truncate max-w-[4rem]">{selectedDocs[idx].name}</a>
+                  <button onClick={()=>removeDocAt(idx)} className="absolute -top-1 -right-1 w-4 h-4 flex items-center justify-center bg-black text-white rounded-full text-xs">×</button>
                 </div>
               ))}
             </div>
           )}
         </div>
 
-        {/* Clip, imagen, vídeo y micro */}
-        {messageMode !== "Nota" && !responderLocked && !recording && (
+        {messageMode!=="Nota" && !responderLocked && !recording && (
           <>
-            <button onClick={handlePdfClick} className="p-1">
-              <Paperclip size={20} color="#818b9c" />
-            </button>
-            <button onClick={handleImageClick} className="p-1">
-              <ImageIcon size={20} color="#818b9c" />
-            </button>
-            <button onClick={handleVideoClick} className="p-1">
-              <Video size={20} color="#818b9c" />
-            </button>
-            <button onClick={handleMicClick} className="p-1">
-              <Mic size={20} color="#818b9c" />
-            </button>
+            <button onClick={handleFileClick} className="p-1"><Paperclip size={20} color="#818b9c"/></button>
+            <button onClick={handleImageClick} className="p-1"><ImageIcon size={20} color="#818b9c"/></button>
+            <button onClick={handleVideoClick} className="p-1"><Video size={20} color="#818b9c"/></button>
+            <button onClick={handleMicClick} className="p-1"><Mic size={20} color="#818b9c"/></button>
           </>
         )}
 
-        {/* Durante grabación */}
         {!responderLocked && recording && (
           <>
-            <button onClick={cancelRecording} className="p-1">
-              <Trash2 size={20} color="#818b9c" />
-            </button>
-            <button onClick={handlePauseClick} className="p-1">
-              {paused ? <Play size={20} color="#818b9c" /> : <Pause size={20} color="#818b9c" />}
-            </button>
+            <button onClick={cancelRecording} className="p-1"><Trash2 size={20} color="#818b9c"/></button>
+            <button onClick={handlePauseClick} className="p-1">{paused ? <Play size={20} color="#818b9c"/> : <Pause size={20} color="#818b9c"/>}</button>
           </>
         )}
 
-        {/* Botón enviar / añadir nota */}
         <button
           onClick={sendMessage}
           disabled={!canSend}
-          className={`w-40 px-4 py-2 rounded text-white ml-auto ${
-            canSend ? "bg-[#0084ff] hover:bg-[#006fdd]" : "bg-[#80c2ff] cursor-not-allowed"
-          }`}
+          className={`w-40 px-4 py-2 rounded text-white ml-auto ${canSend ? "bg-[#0084ff] hover:bg-[#006fdd]" : "bg-[#80c2ff] cursor-not-allowed"}`}
         >
-          {messageMode === "Nota"
-            ? "Añadir Nota"
-            : isLocked
-              ? "Enviar Plantilla"
-              : selectedTpl
-                ? "Enviar Plantilla"
-                : "Enviar Whatsapp"}
+          {messageMode==="Nota" ? "Añadir Nota"
+            : isLocked ? "Enviar Plantilla"
+            : selectedTpl ? "Enviar Plantilla"
+            : "Enviar Whatsapp"}
         </button>
       </div>
     </div>
