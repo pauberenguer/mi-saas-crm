@@ -1,8 +1,7 @@
 // src/components/ContactListMini.tsx
 "use client";
 
-import React from "react";
-import { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { supabase } from "../utils/supabaseClient";
 import {
   ChevronDown,
@@ -20,6 +19,7 @@ export interface Contact {
   last_customer_message: string;
   estado?: "Abierto" | "Cerrado";
   etiquetas?: Record<string, string>;
+  assigned_to?: string | null;
 }
 
 export interface Profile {
@@ -61,10 +61,12 @@ export default function ContactListMini({
   const [showFilterInput, setShowFilterInput] = useState(false);
   const [filterCondition, setFilterCondition] = useState("");
   const [sortMenuOpen, setSortMenuOpen] = useState(false);
-  const [sortOrder, setSortOrder] = useState<"reciente" | "antiguo">("antiguo");
+  const [sortOrder, setSortOrder] = useState<"reciente" | "antiguo">("reciente");
 
   const statusMenuRef = useRef<HTMLDivElement>(null);
   const sortMenuRef = useRef<HTMLDivElement>(null);
+  const assignMenuRef = useRef<HTMLDivElement>(null);
+  const assignButtonRef = useRef<HTMLButtonElement>(null);
 
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
@@ -72,6 +74,7 @@ export default function ContactListMini({
     return () => clearInterval(id);
   }, []);
 
+  // Close dropdowns on outside click
   useEffect(() => {
     if (!statusMenuOpen) return;
     const handler = (e: MouseEvent) => {
@@ -94,32 +97,24 @@ export default function ContactListMini({
     return () => document.removeEventListener("mousedown", handler);
   }, [sortMenuOpen]);
 
+  // Reset sub-filters on main filter change
   useEffect(() => {
     setStatusFilter("Todos");
     setStatusMenuOpen(false);
     setShowFilterInput(false);
     setFilterCondition("");
     setSortMenuOpen(false);
+    setSelectedFolder(null);
   }, [filter]);
 
-  const diffSeconds = (ts?: string) =>
-    ts ? (now - new Date(ts).getTime()) / 1000 : Infinity;
-  const formatDiff = (sec: number) => {
-    if (sec < 60) return "0 min";
-    if (sec < 3600) return `${Math.floor(sec / 60)} min`;
-    return `${Math.floor(sec / 3600)} h`;
-  };
-  const truncate = (str: string, max = 28) =>
-    str.length > max ? str.slice(0, max) + "..." : str;
-
-  // Fetch contacts + last viewed
+  // Fetch contacts
   useEffect(() => {
     (async () => {
       setLoading(true);
       let query = supabase
         .from("contactos")
         .select(
-          "session_id,name,created_at,is_paused,last_viewed_at,last_customer_message,estado,etiquetas"
+          "session_id,name,created_at,is_paused,last_viewed_at,last_customer_message,estado,etiquetas,assigned_to"
         );
 
       if (filter !== "Todos") {
@@ -156,7 +151,7 @@ export default function ContactListMini({
     })();
   }, [filter, currentUser?.id, selectedFolder, statusFilter]);
 
-  // Update lastMessageAt on new messages
+  // Subscribe to new messages
   useEffect(() => {
     const chan = supabase
       .channel("convos-changes")
@@ -187,7 +182,7 @@ export default function ContactListMini({
     return () => { void supabase.removeChannel(chan); };
   }, []);
 
-  // Subscribe to contact updates, including last_viewed_at
+  // Subscribe to any contactos updates
   useEffect(() => {
     const chan = supabase
       .channel("contactos-updates")
@@ -195,37 +190,60 @@ export default function ContactListMini({
         "postgres_changes",
         { event: "UPDATE", schema: "public", table: "contactos" },
         ({ new: upd }) => {
-          setContacts((prev) =>
-            prev
-              .filter((c) =>
-                filter !== "Todos" && upd.estado === "Cerrado"
-                  ? c.session_id !== upd.session_id
-                  : true
-              )
-              .filter((c) =>
-                filter === "Todos" &&
-                statusFilter !== "Todos" &&
-                upd.estado !== statusFilter
-                  ? c.session_id !== upd.session_id
-                  : true
-              )
-              .map((c) =>
-                c.session_id === upd.session_id
-                  ? {
-                      ...c,
-                      is_paused: (upd as any).is_paused,
-                      estado: (upd as any).estado,
-                      etiquetas: (upd as any).etiquetas,
-                      last_viewed_at: (upd as any).last_viewed_at,
-                    }
-                  : c
-              )
-          );
+          setContacts((prev) => {
+            // First, apply update to existing contact
+            let updated = prev.map((c) =>
+              c.session_id === upd.session_id
+                ? {
+                    ...c,
+                    is_paused: (upd as any).is_paused,
+                    estado: (upd as any).estado,
+                    etiquetas: (upd as any).etiquetas,
+                    last_viewed_at: (upd as any).last_viewed_at,
+                    assigned_to: (upd as any).assigned_to,
+                  }
+                : c
+            );
+            // If we're in "Tú" filter and it was reassigned to someone else, remove it immediately
+            if (
+              filter === "Tú" &&
+              (upd as any).assigned_to !== currentUser?.id
+            ) {
+              updated = updated.filter((c) => c.session_id !== upd.session_id);
+            }
+            // Similarly, if in "No Asignado" and it got assigned, remove
+            if (
+              filter === "No Asignado" &&
+              (upd as any).assigned_to !== null
+            ) {
+              updated = updated.filter((c) => c.session_id !== upd.session_id);
+            }
+            // And for Equipo: if assigned_to changes away from selectedFolder
+            if (
+              filter === "Equipo" &&
+              selectedFolder &&
+              (upd as any).assigned_to !== selectedFolder
+            ) {
+              updated = updated.filter((c) => c.session_id !== upd.session_id);
+            }
+            return updated;
+          });
         }
       )
       .subscribe();
     return () => { void supabase.removeChannel(chan); };
-  }, [filter, statusFilter]);
+  }, [filter, statusFilter, currentUser?.id, selectedFolder]);
+
+  const diffSeconds = (ts?: string) =>
+    ts ? (now - new Date(ts).getTime()) / 1000 : Infinity;
+  const formatDiff = (sec: number) => {
+    if (sec < 60) return "0 min";
+    if (sec < 3600) return `${Math.floor(sec / 60)} min`;
+    if (sec < 86400) return `${Math.floor(sec / 3600)} h`;
+    return `${Math.floor(sec / 86400)} d`;
+  };
+  const truncate = (str: string, max = 28) =>
+    str.length > max ? str.slice(0, max) + "..." : str;
 
   const handleSelect = async (c: Contact) => {
     onSelect(c);
@@ -242,10 +260,6 @@ export default function ContactListMini({
       )
     );
   };
-
-  useEffect(() => {
-    setSelectedFolder(null);
-  }, [filter]);
 
   useEffect(() => {
     if (filter !== "Equipo") return;
@@ -266,13 +280,15 @@ export default function ContactListMini({
   const toggleOne = (id: string, chk: boolean) => {
     const next = chk
       ? [...selectedIds!, id]
-      : (selectedIds || []).filter((x) => x !== id);
+      : selectedIds!.filter((x) => x !== id);
     onSelectionChange!(next);
   };
 
-  if (loadingProfiles && filter === "Equipo" && !selectedFolder)
-    return <div className="p-4 text-center text-gray-500">Cargando…</div>;
-  if (filter === "Equipo" && selectedFolder === null)
+  // Equipo folder selection
+  if (filter === "Equipo" && !selectedFolder) {
+    if (loadingProfiles) {
+      return <div className="p-4 text-center text-gray-500">Cargando…</div>;
+    }
     return (
       <div className="overflow-y-auto bg-white p-4 rounded shadow h-full">
         <h3 className="mb-4 font-semibold text-gray-700">Miembros del Equipo</h3>
@@ -290,12 +306,14 @@ export default function ContactListMini({
         </ul>
       </div>
     );
-  if (loading)
+  }
+  if (loading) {
     return <div className="p-4 text-center text-gray-500">Cargando…</div>;
+  }
 
+  // Filter & sort
   const filtered = contacts.filter((c) => {
     if (c.session_id === selectedContactId) return true;
-
     const term = searchTerm.trim().toLowerCase();
     if (
       term &&
@@ -304,22 +322,16 @@ export default function ContactListMini({
     ) {
       return false;
     }
-
     if (showFilterInput && filterCondition.trim()) {
       const tags = c.etiquetas
         ? Object.values(c.etiquetas).map((v) => v.toLowerCase())
         : [];
-      if (
-        !tags.some((v) =>
-          v.includes(filterCondition.trim().toLowerCase())
-        )
-      ) {
+      if (!tags.some((v) => v.includes(filterCondition.trim().toLowerCase()))) {
         return false;
       }
     }
     return true;
   });
-
   const sorted = filtered.sort((a, b) => {
     const ta = lastMessageAt[a.session_id]
       ? new Date(lastMessageAt[a.session_id]).getTime()
@@ -345,9 +357,7 @@ export default function ContactListMini({
         <span className="text-gray-600 mr-1">
           {filter === "Todos" ? statusFilter : "Abrir"}
         </span>
-        <span className="font-medium text-gray-700 ml-1">
-          {sorted.length}
-        </span>
+        <span className="font-medium text-gray-700 ml-1">{sorted.length}</span>
 
         {filter === "Todos" && !showFilterInput && (
           <div ref={statusMenuRef} className="relative ml-1">
@@ -356,20 +366,18 @@ export default function ContactListMini({
             </button>
             {statusMenuOpen && (
               <ul className="absolute left-0 mt-1 bg-white border border-gray-300 rounded shadow-lg z-10">
-                {(["Abierto", "Cerrado", "Todos"] as StatusFilter[]).map(
-                  (o) => (
-                    <li
-                      key={o}
-                      className="px-4 py-1 text-sm hover:bg-gray-100 cursor-pointer"
-                      onClick={() => {
-                        setStatusFilter(o);
-                        setStatusMenuOpen(false);
-                      }}
-                    >
-                      {o}
-                    </li>
-                  )
-                )}
+                {(["Abierto", "Cerrado", "Todos"] as StatusFilter[]).map((o) => (
+                  <li
+                    key={o}
+                    className="px-4 py-1 text-sm hover:bg-gray-100 cursor-pointer"
+                    onClick={() => {
+                      setStatusFilter(o);
+                      setStatusMenuOpen(false);
+                    }}
+                  >
+                    {o}
+                  </li>
+                ))}
               </ul>
             )}
           </div>
@@ -448,11 +456,11 @@ export default function ContactListMini({
                   <input
                     type="checkbox"
                     className={`form-checkbox h-4 w-4 text-gray-600 ${
-                      selectedIds!.includes(c.session_id)
+                      selectedIds.includes(c.session_id)
                         ? "opacity-100"
                         : "opacity-0 group-hover:opacity-100"
                     }`}
-                    checked={selectedIds!.includes(c.session_id)}
+                    checked={selectedIds.includes(c.session_id)}
                     onChange={(e) => {
                       e.stopPropagation();
                       toggleOne(c.session_id, e.target.checked);
@@ -485,7 +493,7 @@ export default function ContactListMini({
                       <div
                         className={`${
                           unread ? "text-gray-700" : "text-gray-500"
-                        } text-xs`}
+                        } text-xs truncate`}
                       >
                         {preview}
                       </div>

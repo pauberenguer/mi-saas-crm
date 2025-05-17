@@ -1,4 +1,3 @@
-// src/app/chat/page.tsx
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
@@ -12,6 +11,9 @@ import {
   CheckCircle,
   UserPlus,
   XCircle as XIcon,
+  Play,
+  Pause,
+  ChevronDown, // ← Flecha desplegable
 } from "lucide-react";
 import ContactListMini, { Contact, FilterType } from "../../components/ContactListMini";
 import Conversation from "../../components/Conversation";
@@ -35,6 +37,12 @@ const filterOptions: { label: FilterType; Icon: typeof XCircle }[] = [
   { label: "Todos",     Icon: List    },
 ];
 
+const pauseOptions: { label: string; duration: number | null }[] = [
+  { label: "30 Minutos", duration: 30 * 60 * 1000 },
+  { label: "1 Hora",     duration: 60 * 60 * 1000 },
+  { label: "Pausar Para Siempre", duration: null },
+];
+
 export default function ChatPage() {
   const [activeFilter, setActiveFilter] = useState<FilterType>("No Asignado");
   const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
@@ -42,6 +50,8 @@ export default function ChatPage() {
   const [messageMode, setMessageMode] = useState<"Responder" | "Nota">("Responder");
   const [notes, setNotes] = useState<Note[]>([]);
   const [isPaused, setIsPaused] = useState(false);
+  const [contactPauseUntil, setContactPauseUntil] = useState<string | null>(null);
+  const [timeLeft, setTimeLeft] = useState<number>(0);
   const [headerSearch, setHeaderSearch] = useState("");
   const [currentUser, setCurrentUser] = useState<any>(null);
 
@@ -50,7 +60,12 @@ export default function ChatPage() {
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [showAssignMenu, setShowAssignMenu] = useState(false);
 
-  // For closed-state check
+  // Pause menu
+  const [showPauseMenu, setShowPauseMenu] = useState(false);
+  const pauseButtonRef = useRef<HTMLButtonElement>(null);
+  const pauseMenuRef   = useRef<HTMLDivElement>(null);
+
+  // Closed-state check
   const [selectedContactStates, setSelectedContactStates] = useState<
     { session_id: string; estado: string }[]
   >([]);
@@ -63,7 +78,7 @@ export default function ChatPage() {
   // Confirm close
   const [showConfirmClose, setShowConfirmClose] = useState(false);
 
-  // Refs for outside clicks
+  // Assign menu refs (bulk + header)
   const assignButtonRef = useRef<HTMLButtonElement>(null);
   const assignMenuRef   = useRef<HTMLDivElement>(null);
 
@@ -78,17 +93,13 @@ export default function ChatPage() {
     fetchUser();
   }, []);
 
-  // Load profiles
+  // Load profiles for assignment menu
   useEffect(() => {
     supabase
       .from("profiles")
       .select("id, name, avatar_url")
       .then(res => {
-        if (res.error) {
-          console.error(res.error);
-        } else {
-          setProfiles(res.data as Profile[]);
-        }
+        if (!res.error) setProfiles(res.data as Profile[]);
       });
   }, []);
 
@@ -109,150 +120,194 @@ export default function ChatPage() {
     return () => document.removeEventListener("mousedown", handler);
   }, [showAssignMenu]);
 
-  // Fetch etiquetas & paused once on select
+  // Close pause menu on outside click
+  useEffect(() => {
+    if (!showPauseMenu) return;
+    const handler = (e: MouseEvent) => {
+      if (
+        pauseMenuRef.current &&
+        !pauseMenuRef.current.contains(e.target as Node) &&
+        pauseButtonRef.current &&
+        !pauseButtonRef.current.contains(e.target as Node)
+      ) {
+        setShowPauseMenu(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [showPauseMenu]);
+
+  // Fetch etiquetas, paused and pause_until on select
   useEffect(() => {
     if (!selectedContact) return;
     supabase
       .from("contactos")
-      .select("etiquetas, is_paused")
+      .select("etiquetas, is_paused, pause_until")
       .eq("session_id", selectedContact.session_id)
       .single()
       .then(res => {
-        if (res.error) {
-          console.error(res.error);
-          setContactEtiquetas({});
-          setIsPaused(false);
-        } else {
-          const data = res.data as { etiquetas: Record<string, string>; is_paused: boolean };
-          setContactEtiquetas(data.etiquetas || {});
-          setIsPaused(data.is_paused || false);
+        if (!res.error) {
+          const { etiquetas, is_paused, pause_until } = res.data as any;
+          setContactEtiquetas(etiquetas || {});
+          setIsPaused(is_paused);
+          setContactPauseUntil(pause_until);
         }
       });
   }, [selectedContact]);
 
-  // Real-time subscription for etiquetas & is_paused
+  // Real-time subscription for etiquetas, is_paused & pause_until
   useEffect(() => {
     if (!selectedContact) return;
-    const channel = supabase
+    const chan = supabase
       .channel(`contactos-realtime-${selectedContact.session_id}`)
-      .on(
-        "postgres_changes",
-        {
+      .on("postgres_changes", {
           event: "UPDATE",
           schema: "public",
           table: "contactos",
           filter: `session_id=eq.${selectedContact.session_id}`,
         },
-        ({ new: updated }) => {
-          // @ts-ignore
-          setIsPaused(updated.is_paused);
-          // @ts-ignore
-          setContactEtiquetas(updated.etiquetas || {});
+        ({ new: u }) => {
+          setIsPaused((u as any).is_paused);
+          setContactPauseUntil((u as any).pause_until);
+          setContactEtiquetas((u as any).etiquetas || {});
         }
       )
       .subscribe();
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    return () => supabase.removeChannel(chan);
   }, [selectedContact]);
 
-  // Play sound on new human message
+  // Countdown timer for pause_until
   useEffect(() => {
-    const channel = supabase
-      .channel("global-new-human-messages")
-      .on(
-        "postgres_changes",
-        { event: "INSERT", schema: "public", table: "conversaciones" },
-        payload => {
-          const mRaw = (payload.new as any).message;
-          const m = typeof mRaw === "string" ? JSON.parse(mRaw) : mRaw;
-          const origin = m.additional_kwargs?.origin;
-          if (m.type === "human" && origin !== "crm" && origin !== "note") {
-            audioRef.current?.play().catch(console.error);
-          }
-        }
-      )
-      .subscribe();
-    return () => void supabase.removeChannel(channel);
-  }, []);
-
-  // Real-time notes subscription
-  useEffect(() => {
-    if (!selectedContact) return;
-    const channel = supabase
-      .channel("new-note-messages")
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT", schema: "public", table: "conversaciones",
-          filter: `session_id=eq.${selectedContact.session_id}`,
-        },
-        payload => {
-          const row = payload.new as any;
-          if (row.message?.additional_kwargs?.origin === "note") {
-            setNotes(prev => [...prev, row as Note]);
-          }
-        }
-      )
-      .subscribe();
-    return () => {
-      void supabase.removeChannel(channel);
-    };
-  }, [selectedContact]);
-
-  // Fetch notes
-  useEffect(() => {
-    if (!selectedContact) return;
-    supabase
-      .from("conversaciones")
-      .select("*")
-      .eq("session_id", selectedContact.session_id)
-      .eq("message->additional_kwargs->>origin", "note")
-      .order("id", { ascending: true })
-      .then(res => {
-        if (res.error) console.error(res.error);
-        else setNotes(res.data as Note[]);
-      });
-  }, [selectedContact]);
-
-  // Fetch states of selected for closed-check
-  useEffect(() => {
-    if (selectedIds.length === 0) {
-      setSelectedContactStates([]);
+    if (!contactPauseUntil) {
+      setTimeLeft(0);
       return;
     }
-    supabase
-      .from("contactos")
-      .select("session_id, estado")
-      .in("session_id", selectedIds)
-      .then(res => {
-        if (res.error) console.error(res.error);
-        else setSelectedContactStates(res.data as { session_id: string; estado: string }[]);
-      });
-  }, [selectedIds]);
+    const update = () => {
+      const ms = Date.parse(contactPauseUntil) - Date.now();
+      if (ms <= 0) resumeAutomation();
+      else setTimeLeft(ms);
+    };
+    update();
+    const iv = setInterval(update, 1000);
+    return () => clearInterval(iv);
+  }, [contactPauseUntil]);
 
-  // Helpers
+  // Format remaining time as HH:mm:ss or mm:ss
+  const formatTime = (ms: number) => {
+    const totalSec = Math.ceil(ms / 1000);
+    const h = Math.floor(totalSec / 3600);
+    const m = Math.floor((totalSec % 3600) / 60);
+    const s = totalSec % 60;
+    return `${h > 0 ? String(h).padStart(2,"0")+":" : ""}${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`;
+  };
+
+  // Pause automation
+  const pauseAutomation = async (duration: number | null) => {
+    if (!selectedContact) return;
+    const payload: any = { is_paused: true, pause_until: null };
+    if (duration) payload.pause_until = new Date(Date.now()+duration).toISOString();
+    await supabase
+      .from("contactos")
+      .update(payload)
+      .eq("session_id", selectedContact.session_id);
+    setIsPaused(true);
+    setContactPauseUntil(payload.pause_until);
+  };
+  const resumeAutomation = async () => {
+    if (!selectedContact) return;
+    await supabase
+      .from("contactos")
+      .update({ is_paused: false, pause_until: null })
+      .eq("session_id", selectedContact.session_id);
+    setIsPaused(false);
+    setContactPauseUntil(null);
+    setShowPauseMenu(false);
+  };
+
+  // Bulk assign / unassign / reopen / close
+  const assignConversationsTo = async (userId: string) => {
+    if (!selectedIds.length) return;
+    const { error } = await supabase
+      .from("contactos")
+      .update({ assigned_to: userId })
+      .in("session_id", selectedIds);
+    if (!error) {
+      setSelectedIds([]);
+      setActiveFilter("Tú");
+      setShowAssignMenu(false);
+      setShowAssignedToast(true);
+      setTimeout(() => setShowAssignedToast(false), 5000);
+    }
+  };
+  const unassignConversations = async () => {
+    if (!selectedIds.length) return;
+    const { error } = await supabase
+      .from("contactos")
+      .update({ assigned_to: null })
+      .in("session_id", selectedIds);
+    if (!error) {
+      setSelectedIds([]);
+      setActiveFilter("No Asignado");
+      setShowAssignMenu(false);
+    }
+  };
+  const reOpenConversations = async () => {
+    if (!selectedIds.length) return;
+    const { error } = await supabase
+      .from("contactos")
+      .update({ estado: "Abierto", assigned_to: null })
+      .in("session_id", selectedIds);
+    if (!error) {
+      setSelectedIds([]);
+      setActiveFilter("No Asignado");
+      setShowAssignMenu(false);
+      setShowReopenedToast(true);
+      setTimeout(() => setShowReopenedToast(false), 5000);
+    }
+  };
+  const markAsClosed = async () => {
+    if (!selectedIds.length) return;
+    const { error } = await supabase
+      .from("contactos")
+      .update({ estado: "Cerrado" })
+      .in("session_id", selectedIds);
+    if (!error) {
+      setSelectedIds([]);
+      setShowDeletedToast(true);
+      setTimeout(() => setShowDeletedToast(false), 5000);
+    }
+  };
+
+  // Assign only the currently open conversation
+  const assignCurrentContactTo = async (userId: string) => {
+    if (!selectedContact) return;
+    const { error } = await supabase
+      .from("contactos")
+      .update({ assigned_to: userId })
+      .eq("session_id", selectedContact.session_id);
+    if (!error) {
+      setShowAssignMenu(false);
+      setShowAssignedToast(true);
+      setTimeout(() => setShowAssignedToast(false), 5000);
+    }
+  };
+
+  // Notes & tags helpers
   const handleNoteClick = (note: Note) => {
-    const el = document.getElementById(`note-${note.id}`);
-    el?.scrollIntoView({ behavior: "smooth", block: "center" });
+    document.getElementById(`note-${note.id}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
   };
   const deleteNote = (id: number) => {
     supabase
       .from("conversaciones")
       .delete()
       .eq("id", id)
-      .then(() => {
-        if (!selectedContact) return;
-        return supabase
-          .from("conversaciones")
-          .select("*")
-          .eq("session_id", selectedContact.session_id)
-          .eq("message->additional_kwargs->>origin", "note")
-          .order("id", { ascending: true });
-      })
-      .then(res => {
-        if (res?.data) setNotes(res.data as Note[]);
-      });
+      .then(() => selectedContact && supabase
+        .from("conversaciones")
+        .select("*")
+        .eq("session_id", selectedContact.session_id) 
+        .eq("message->additional_kwargs->>origin", "note")
+        .order("id", { ascending: true }))
+      .then(res => res?.data && setNotes(res.data as Note[]));
   };
   const deleteTag = async (key: string) => {
     if (!selectedContact || !contactEtiquetas) return;
@@ -264,81 +319,25 @@ export default function ChatPage() {
       .eq("session_id", selectedContact.session_id);
     setContactEtiquetas(updated);
   };
-  const pauseAutomation = async () => {
-    if (!selectedContact) return;
-    await supabase
-      .from("contactos")
-      .update({ is_paused: true })
-      .eq("session_id", selectedContact.session_id);
-    setIsPaused(true);
-  };
-  const resumeAutomation = async () => {
-    if (!selectedContact) return;
-    await supabase
-      .from("contactos")
-      .update({ is_paused: false })
-      .eq("session_id", selectedContact.session_id);
-    setIsPaused(false);
-  };
 
-  // Assign / Unassign
-  const assignConversationsTo = async (userId: string) => {
-    if (selectedIds.length === 0) return;
-    const { error } = await supabase
-      .from("contactos")
-      .update({ assigned_to: userId })
-      .in("session_id", selectedIds);
-    if (error) console.error(error);
-    else {
-      setSelectedIds([]);
-      setActiveFilter("Tú");
-      setShowAssignMenu(false);
-      setShowAssignedToast(true);
-      setTimeout(() => setShowAssignedToast(false), 5000);
-    }
-  };
-  const unassignConversations = async () => {
-    if (selectedIds.length === 0) return;
-    const { error } = await supabase
-      .from("contactos")
-      .update({ assigned_to: null })
-      .in("session_id", selectedIds);
-    if (error) console.error(error);
-    else {
-      setSelectedIds([]);
-      setActiveFilter("No Asignado");
-      setShowAssignMenu(false);
-    }
-  };
-
-  // Close conversations
-  const reOpenConversations = async () => {
-    if (selectedIds.length === 0) return;
-    const { error } = await supabase
-      .from("contactos")
-      .update({ estado: "Abierto", assigned_to: null })
-      .in("session_id", selectedIds);
-    if (error) console.error(error);
-    else {
-      setSelectedIds([]);
-      setActiveFilter("No Asignado");
-      setShowAssignMenu(false);
-      setShowReopenedToast(true);
-      setTimeout(() => setShowReopenedToast(false), 5000);
-    }
-  };
-
-  // Marcamos como vista la conversación anterior antes de cambiar
+  // Select contact
   const handleSelectContact = async (c: Contact) => {
     if (selectedContact) {
-      const nowIso = new Date().toISOString();
       await supabase
         .from("contactos")
-        .update({ last_viewed_at: nowIso })
+        .update({ last_viewed_at: new Date().toISOString() })
         .eq("session_id", selectedContact.session_id);
     }
     setSelectedContact(c);
     setShowAssignMenu(false);
+    // load notes
+    const { data } = await supabase
+      .from("conversaciones")
+      .select("*")
+      .eq("session_id", c.session_id)
+      .eq("message->additional_kwargs->>origin", "note")
+      .order("id", { ascending: true });
+    if (data) setNotes(data as Note[]);
   };
 
   return (
@@ -354,29 +353,26 @@ export default function ChatPage() {
       <div className="relative flex flex-col h-full bg-gray-50 p-8 animate-fadeIn">
         <audio ref={audioRef} src="/notification.mp3" preload="auto" />
 
+        {/* Header */}
         <div className="animate-fadeIn mb-2 grid grid-cols-3 items-center">
-          <div className="justify-self-start">
-            <h1 className="text-3xl font-bold" style={{ color: "#1d1d1d" }}>
-              Chat
-            </h1>
-          </div>
+          <h1 className="text-3xl font-bold" style={{ color: "#1d1d1d" }}>Chat</h1>
           <div className="justify-self-center flex items-center border border-gray-300 rounded px-3 py-1">
             <Search size={16} className="text-gray-500" />
             <input
               type="text"
               placeholder="Buscar…"
               value={headerSearch}
-              onChange={(e) => setHeaderSearch(e.target.value)}
+              onChange={e => setHeaderSearch(e.target.value)}
               className="ml-2 w-48 placeholder-gray-500 focus:outline-none"
             />
           </div>
           <div />
         </div>
-
         <hr className="border-t mb-8 animate-fadeIn" style={{ borderColor: "#4d4d4d" }} />
 
         <div className="flex flex-1">
-          <div className="w-48 p-4">
+          {/* Sidebar Filters */}
+          <aside className="w-48 p-4">
             <h2 className="text-xl font-bold mb-4">Conversaciones</h2>
             <div className="flex flex-col space-y-2">
               {filterOptions.map(({ label, Icon }) => (
@@ -399,9 +395,11 @@ export default function ChatPage() {
                 </button>
               ))}
             </div>
-          </div>
+          </aside>
 
+          {/* Main Area */}
           <div className="flex flex-1">
+            {/* Contact List */}
             <div className="w-1/4 h-full shadow-md">
               <ContactListMini
                 searchTerm={headerSearch}
@@ -410,74 +408,195 @@ export default function ChatPage() {
                 filter={activeFilter}
                 currentUser={currentUser}
                 selectedIds={selectedIds}
-                onSelectionChange={(ids) => {
+                onSelectionChange={ids => {
                   setSelectedIds(ids);
                   setShowAssignMenu(false);
                 }}
               />
             </div>
-
             <div className="w-px bg-gray-300 shadow-[0_0_10px_rgba(0,0,0,0.3)]" />
 
+            {/* Bulk Actions or Chat View */}
             {selectedIds.length > 0 ? (
-              selectedContactStates.every((s) => s.estado === "Cerrado") ? (
+              (activeFilter === "Tú" || activeFilter === "Equipo") ? (
+                <div className="flex-1">
+                  <div className="bg-white shadow rounded p-4 h-full flex flex-col items-center justify-center space-y-4">
+                    <button
+                      onClick={markAsClosed}
+                      className="border-2 border-gray-300 w-64 px-4 py-2 rounded flex items-center justify-center hover:bg-gray-100"
+                    >
+                      <CheckCircle className="w-4 h-4 mr-1" />
+                      Marcar como Cerrado
+                    </button>
+                    <div className="relative w-64">
+                      <button
+                        ref={assignButtonRef}
+                        onClick={() => setShowAssignMenu(v => !v)}
+                        className="border-2 border-gray-300 w-full px-4 py-2 rounded flex items-center justify-center hover:bg-gray-100"
+                      >
+                        <UserPlus className="w-4 h-4 mr-1" />
+                        Asignar conversaciones
+                      </button>
+                      {showAssignMenu && (
+                        <div
+                          ref={assignMenuRef}
+                          className="absolute left-0 top-full mt-1 bg-white border border-gray-200 rounded shadow-lg w-full max-h-60 overflow-y-auto z-20"
+                        >
+                          {profiles.map(p => (
+                            <button
+                              key={p.id}
+                              onClick={() => assignConversationsTo(p.id)}
+                              className="w-full text-left px-4 py-2 hover:bg-gray-100 flex items-center"
+                            >
+                              <img
+                                src={p.avatar_url || "/avatar-placeholder.png"}
+                                alt={p.name}
+                                className="w-6 h-6 rounded-full mr-2 object-cover"
+                              />
+                              <span className="text-sm">{p.name}</span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    <button
+                      onClick={unassignConversations}
+                      className="border-2 border-gray-300 w-64 px-4 py-2 rounded flex items-center justify-center hover:bg-gray-100"
+                    >
+                      <XCircle className="w-4 h-4 mr-1" />
+                      No asignar conversaciones
+                    </button>
+                    <button
+                      onClick={() => setSelectedIds([])}
+                      className="border-2 border-gray-300 w-64 px-4 py-2 rounded flex items-center justify-center hover:bg-gray-100"
+                    >
+                      <XIcon className="w-4 h-4 mr-1" />
+                      Quitar selección
+                    </button>
+                  </div>
+                </div>
+              ) : activeFilter === "No Asignado" ? (
                 <div className="flex-1">
                   <div className="bg-white shadow rounded p-4 h-full flex flex-col items-center justify-center">
-                    <img
-                      src="/asignar.svg"
-                      alt="Closed Placeholder"
-                      className="w-48 h-auto mb-4"
-                    />
+                    <p className="text-[#4d4d4d] font-medium mb-4">
+                      {selectedIds.length} Conversaciones Seleccionadas
+                    </p>
+                    <button
+                      onClick={markAsClosed}
+                      className="border-2 border-gray-300 w-64 px-4 py-2 rounded flex items-center justify-center hover:bg-gray-100 mb-2"
+                    >
+                      <CheckCircle className="w-4 h-4 mr-1" />
+                      Marcar Como Cerrado
+                    </button>
+                    <div className="relative w-64 mb-2">
+                      <button
+                        ref={assignButtonRef}
+                        onClick={() => setShowAssignMenu(v => !v)}
+                        className="border-2 border-gray-300 w-full px-4 py-2 rounded flex items-center justify-center hover:bg-gray-100"
+                      >
+                        <UserPlus className="w-4 h-4 mr-1" />
+                        Asignar Conversaciones
+                      </button>
+                      {showAssignMenu && (
+                        <div
+                          ref={assignMenuRef}
+                          className="absolute left-0 top-full mt-1 bg-white border border-gray-200 rounded shadow-lg w-full max-h-60 overflow-y-auto z-20"
+                        >
+                          {profiles.map(p => (
+                            <button
+                              key={p.id}
+                              onClick={() => assignConversationsTo(p.id)}
+                              className="w-full text-left px-4 py-2 hover:bg-gray-100 flex items-center"
+                            >
+                              <img
+                                src={p.avatar_url || "/avatar-placeholder.png"}
+                                alt={p.name}
+                                className="w-6 h-6 rounded-full mr-2 object-cover"
+                              />
+                              <span className="text-sm">{p.name}</span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    <button
+                      onClick={() => setSelectedIds([])}
+                      className="border-2 border-gray-300 w-64 px-4 py-2 rounded flex items-center justify-center hover:bg-gray-100"
+                    >
+                      <XIcon className="w-4 h-4 mr-1" />
+                      Quitar Selección
+                    </button>
+                  </div>
+                </div>
+              ) : selectedContactStates.every(s => s.estado === "Cerrado") ? (
+                <div className="flex-1">
+                  <div className="bg-white shadow rounded p-4 h-full flex flex-col items-center justify-center">
+                    <img src="/asignar.svg" alt="Closed" className="w-48 h-auto mb-4" />
                     <p className="text-[#4d4d4d] font-medium mb-4">
                       {selectedIds.length} Conversaciones Cerradas Seleccionadas
                     </p>
-                    <div className="flex flex-col items-center space-y-2">
-                      <button
-                        onClick={reOpenConversations}
-                        className="border-2 border-gray-300 w-64 px-4 py-2 rounded flex items-center justify-center hover:bg-gray-100"
-                      >
-                        <CheckCircle className="w-4 h-4 mr-1" />
-                        Reabrir Conversaciones
-                      </button>
-                      <button
-                        onClick={() => setSelectedIds([])}
-                        className="border-2 border-gray-300 w-64 px-4 py-2 rounded flex items-center justify-center hover:bg-gray-100"
-                      >
-                        <XIcon className="w-4 h-4 mr-1" />
-                        Quitar Selección
-                      </button>
-                    </div>
+                    <button
+                      onClick={reOpenConversations}
+                      className="border-2 border-gray-300 w-64 px-4 py-2 rounded flex items-center justify-center hover:bg-gray-100 mb-2"
+                    >
+                      <CheckCircle className="w-4 h-4 mr-1" />
+                      Reabrir Conversaciones
+                    </button>
+                    <button
+                      onClick={() => setSelectedIds([])}
+                      className="border-2 border-gray-300 w-64 px-4 py-2 rounded flex items-center justify-center hover:bg-gray-100"
+                    >
+                      <XIcon className="w-4 h-4 mr-1" />
+                      Quitar Selección
+                    </button>
                   </div>
                 </div>
               ) : (
                 <div className="flex-1">
                   <div className="bg-white shadow rounded p-4 h-full flex items-center justify-center">
                     <div className="relative flex flex-col items-center space-y-2">
-                      <img
-                        src="/asignar.svg"
-                        alt="Bulk Placeholder"
-                        className="w-48 h-auto mb-4"
-                      />
+                      <img src="/asignar.svg" alt="Bulk" className="w-48 h-auto mb-4" />
                       <p className="text-[#4d4d4d] font-medium mb-4">
                         {selectedIds.length} Conversaciones Seleccionadas
                       </p>
+                      <div className="relative w-64 mb-2">
+                        <button
+                          ref={assignButtonRef}
+                          onClick={() => setShowAssignMenu(v => !v)}
+                          className="border-2 border-gray-300 w-full px-4 py-2 rounded flex items-center justify-center hover:bg-gray-100"
+                        >
+                          <UserPlus className="w-4 h-4 mr-1" />
+                          Asignar Conversaciones
+                        </button>
+                        {showAssignMenu && (
+                          <div
+                            ref={assignMenuRef}
+                            className="absolute left-0 top-full mt-1 bg-white border border-gray-200 rounded shadow-lg w-full max-h-60 overflow-y-auto z-20"
+                          >
+                            {profiles.map(p => (
+                              <button
+                                key={p.id}
+                                onClick={() => assignConversationsTo(p.id)}
+                                className="w-full text-left px-4 py-2 hover:bg-gray-100 flex items-center"
+                              >
+                                <img
+                                  src={p.avatar_url || "/avatar-placeholder.png"}
+                                  alt={p.name}
+                                  className="w-6 h-6 rounded-full mr-2 object-cover"
+                                />
+                                <span className="text-sm">{p.name}</span>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                       <button
-                        ref={assignButtonRef}
-                        onClick={() => setShowAssignMenu(v => !v)}
+                        onClick={unassignConversations}
                         className="border-2 border-gray-300 w-64 px-4 py-2 rounded flex items-center justify-center hover:bg-gray-100"
                       >
-                        <UserPlus className="w-4 h-4 mr-1" />
-                        Asignar Conversaciones
+                        <XCircle className="w-4 h-4 mr-1" />
+                        No Asignar Conversaciones
                       </button>
-                      {activeFilter !== "No Asignado" && (
-                        <button
-                          onClick={unassignConversations}
-                          className="border-2 border-gray-300 w-64 px-4 py-2 rounded flex items-center justify-center hover:bg-gray-100"
-                        >
-                          <XCircle className="w-4 h-4 mr-1" />
-                          No Asignar Conversaciones
-                        </button>
-                      )}
                       <button
                         onClick={() => setShowConfirmClose(true)}
                         className="border-2 border-gray-300 w-64 px-4 py-2 rounded flex items-center justify-center hover:bg-gray-100"
@@ -492,49 +611,57 @@ export default function ChatPage() {
                         <XIcon className="w-4 h-4 mr-1" />
                         Quitar Selección
                       </button>
-
-                      {showAssignMenu && (
-                        <div
-                          ref={assignMenuRef}
-                          className="absolute top-full mt-2 bg-white border border-gray-200 rounded shadow-lg w-64 max-h-60 overflow-y-auto z-20"
-                        >
-                          {profiles.map(p => (
-                            <button
-                              key={p.id}
-                              onClick={() => assignConversationsTo(p.id)}
-                              className="w-full text-left px-4 py-2 hover:bg-gray-100 flex items-center"
-                            >
-                              <img
-                                src={p.avatar_url || "/avatar-placeholder.png"}
-                                alt={p.name}
-                                className="w-6 h-6 rounded-full mr-2 object-cover"
-                              />
-                              {p.name}
-                            </button>
-                          ))}
-                        </div>
-                      )}
                     </div>
                   </div>
                 </div>
               )
             ) : selectedContact ? (
+              // Chat individual con asignación desde el menú junto a la flecha
               <>
                 <div className="flex-1">
                   <div className="bg-white shadow rounded p-4 h-full flex flex-col">
-                    <div className="text-sm text-gray-500 mb-2 text-center">
-                      {activeFilter}
+                    {/* FILTRO Y FLECHA A LA IZQUIERDA */}
+                    <div className="mb-2 flex items-center">
+                      <span className="text-sm text-gray-500">{activeFilter}</span>
+                      <div className="relative inline-block ml-2">
+                        <button
+                          ref={assignButtonRef}
+                          onClick={() => setShowAssignMenu(v => !v)}
+                          className="p-1 rounded hover:bg-gray-100"
+                        >
+                          <ChevronDown size={16} className="text-gray-500" />
+                        </button>
+                        {showAssignMenu && (
+                          <div
+                            ref={assignMenuRef}
+                            className="absolute left-0 top-full mt-1 w-48 bg-white border border-gray-200 rounded shadow-lg z-20 max-h-60 overflow-y-auto"
+                          >
+                            {profiles.map(p => (
+                              <button
+                                key={p.id}
+                                onClick={() => assignCurrentContactTo(p.id)}
+                                className="w-full text-left px-4 py-2 hover:bg-gray-100 flex items-center"
+                              >
+                                <img
+                                  src={p.avatar_url || "/avatar-placeholder.png"}
+                                  alt={p.name}
+                                  className="w-6 h-6 rounded-full mr-2 object-cover"
+                                />
+                                <span className="text-sm">{p.name}</span>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                     </div>
                     <hr className="border-t border-gray-200 mb-4" />
                     <div className="flex items-center mb-4">
                       <img
                         src="/avatar-placeholder.png"
                         alt={selectedContact.name}
-                        className="w-10 h-10 rounded-full object-cover mr-2 shadow-md"
+                        className="w-10 h-10 rounded-full mr-2 shadow-md"
                       />
-                      <span className="text-xl font-bold text-gray-800">
-                        {selectedContact.name}
-                      </span>
+                      <span className="text-xl font-bold text-gray-800">{selectedContact.name}</span>
                     </div>
                     <Conversation
                       contactId={selectedContact.session_id}
@@ -546,135 +673,126 @@ export default function ChatPage() {
                   </div>
                 </div>
                 <div className="w-px bg-gray-300 shadow-[0_0_10px_rgba(0,0,0,0.3)]" />
-                <div className="w-1/4">
-                  <div className="bg-white shadow rounded p-4 h-full flex flex-col overflow-y-auto">
-                    <h2 className="text-xl font-bold mb-2">
-                      {selectedContact.name}
-                    </h2>
-                    <img
-                      src="/avatar-placeholder.png"
-                      alt={selectedContact.name}
-                      className="w-24 h-24 rounded-full object-cover mb-4"
-                    />
-                    <div className="flex items-center mb-4 space-x-1">
-                      <Phone size={16} color="#818b9c" />
-                      <span className="text-sm text-gray-700">
-                        {selectedContact.session_id}
-                      </span>
-                    </div>
-                    <hr className="border-t border-gray-300 shadow-sm mb-4" />
+                <aside className="w-1/4 bg-white shadow rounded p-4 flex flex-col overflow-y-auto">
+                  <h2 className="text-xl font-bold mb-2">{selectedContact.name}</h2>
+                  <img
+                    src="/avatar-placeholder.png"
+                    alt={selectedContact.name}
+                    className="w-24 h-24 rounded-full mb-4"
+                  />
+                  <div className="flex items-center mb-4 space-x-1">
+                    <Phone size={16} color="#818b9c" />
+                    <span className="text-sm text-gray-700">{selectedContact.session_id}</span>
+                  </div>
+                  <hr className="border-t border-gray-300 mb-4" />
 
-                    <div className="mb-4">
-                      <p className="font-semibold mb-2">Automatización</p>
-                      {isPaused ? (
+                  {/* Automatización */}
+                  <div className="mb-4 relative">
+                    <p className="font-semibold mb-2">Automatización</p>
+                    {isPaused ? (
+                      <>
                         <button
-                          onClick={resumeAutomation}
-                          className="w-full py-2 rounded bg-red-500 text-white"
+                          ref={pauseButtonRef}
+                          onClick={() => setShowPauseMenu(v => !v)}
+                          className={`w-full py-2 rounded ${showPauseMenu ? "bg-gray-600" : "bg-gray-500"} text-white`}
                         >
-                          Pausado
+                          {contactPauseUntil ? formatTime(timeLeft) : "Pausado"}
                         </button>
-                      ) : (
+                        {showPauseMenu && (
+                          <div ref={pauseMenuRef} className="absolute top-full mt-1 w-full bg-white border rounded shadow-lg z-20">
+                            <button onClick={resumeAutomation} className="w-full px-4 py-2 hover:bg-gray-100 flex items-center">
+                              <Play className="w-4 h-4 mr-2" /> Reanudar
+                            </button>
+                            {pauseOptions.map(opt => (
+                              <button
+                                key={opt.label}
+                                onClick={() => { setShowPauseMenu(false); pauseAutomation(opt.duration); }}
+                                className="w-full px-4 py-2 hover:bg-gray-100 flex items-center"
+                              >
+                                {opt.label === "Pausar Para Siempre" && <Pause className="w-4 h-4 mr-2" />}
+                                {opt.label}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <>
                         <button
-                          onClick={pauseAutomation}
-                          className="w-full py-2 rounded bg-blue-500 text-white"
+                          ref={pauseButtonRef}
+                          onClick={() => setShowPauseMenu(true)}
+                          className={`w-full py-2 rounded ${showPauseMenu ? "bg-blue-600" : "bg-blue-500"} text-white`}
                         >
                           Pausar
                         </button>
-                      )}
-                    </div>
-                    <hr className="border-t border-gray-300 shadow-sm mb-4" />
-
-                    <div className="mb-4">
-                      <p className="font-semibold mb-2">Notas</p>
-                      {notes.length > 0 ? (
-                        notes.map(note => (
-                          <div
-                            key={note.id}
-                            id={`note-${note.id}`}
-                            onClick={() => handleNoteClick(note)}
-                            className="relative p-2 mb-2 bg-[#fdf0d0] rounded cursor-pointer hover:opacity-80"
-                          >
-                            <button
-                              onClick={e => {
-                                e.stopPropagation();
-                                deleteNote(note.id);
-                              }}
-                              className="absolute top-0 right-0 text-xs text-gray-600 hover:text-gray-700"
-                            >
-                              X
-                            </button>
-                            <p className="text-sm text-gray-800">
-                              {note.message.content}
-                            </p>
-                            <small className="text-xs text-gray-600">
-                              {note.created_at
-                                ? new Date(note.created_at).toLocaleString()
-                                : ""}
-                            </small>
-                          </div>
-                        ))
-                      ) : (
-                        <span className="text-sm text-gray-500">No hay notas.</span>
-                      )}
-                    </div>
-                    <hr className="border-t border-gray-300 shadow-sm mb-4" />
-
-                    <p className="font-semibold mb-2">Etiquetas</p>
-                    <div className="flex flex-wrap gap-2">
-                      {contactEtiquetas &&
-                        Object.entries(contactEtiquetas).map(([key, value]) =>
-                          value.trim() ? (
-                            <div key={key} className="relative inline-block">
-                              <span className="px-2 py-1 text-sm font-medium bg-[#eff7ff] text-gray-800 border border-[#80c2ff] rounded-full">
-                                {value}
-                              </span>
+                        {showPauseMenu && (
+                          <div ref={pauseMenuRef} className="absolute top-full mt-1 w-full bg-white border rounded shadow-lg z-20">
+                            {pauseOptions.map(opt => (
                               <button
-                                onClick={() => deleteTag(key)}
-                                className="absolute -top-1 -right-1 text-xs text-black hover:text-gray-700"
+                                key={opt.label}
+                                onClick={() => { setShowPauseMenu(false); pauseAutomation(opt.duration); }}
+                                className="w-full px-4 py-2 hover:bg-gray-100 flex items-center"
                               >
-                                X
+                                {opt.label === "Pausar Para Siempre" && <Pause className="w-4 h-4 mr-2" />}
+                                {opt.label}
                               </button>
-                            </div>
-                          ) : null
+                            ))}
+                          </div>
                         )}
-                    </div>
+                      </>
+                    )}
                   </div>
-                </div>
+
+                  <hr className="border-t border-gray-300 mb-4" />
+
+                  {/* Notas */}
+                  <div className="mb-4">
+                    <p className="font-semibold mb-2">Notas</p>
+                    {notes.length ? notes.map(note => (
+                      <div key={note.id} id={`note-${note.id}`} onClick={() => handleNoteClick(note)} className="relative p-2 mb-2 bg-[#fdf0d0] rounded cursor-pointer hover:opacity-80">
+                        <button onClick={e => { e.stopPropagation(); deleteNote(note.id); }} className="absolute top-0 right-0 text-xs text-gray-600 hover:text-gray-700">X</button>
+                        <p className="text-sm text-gray-800">{note.message.content}</p>
+                        <small className="text-xs text-gray-600">{note.created_at && new Date(note.created_at).toLocaleString()}</small>
+                      </div>
+                    )) : <span className="text-sm text-gray-500">No hay notas.</span>}
+                  </div>
+
+                  <hr className="border-t border-gray-300 mb-4" />
+
+                  {/* Etiquetas */}
+                  <p className="font-semibold mb-2">Etiquetas</p>
+                  <div className="flex flex-wrap gap-2">
+                    {contactEtiquetas && Object.entries(contactEtiquetas).map(([key, value]) => value.trim() && (
+                      <div key={key} className="relative inline-block">
+                        <span className="px-2 py-1 text-sm font-medium bg-[#eff7ff] text-gray-800 border border-[#80c2ff] rounded-full">{value}</span>
+                        <button onClick={() => deleteTag(key)} className="absolute -top-1 -right-1 text-xs text-black hover:text-gray-700">X</button>
+                      </div>
+                    ))}
+                  </div>
+                </aside>
               </>
             ) : (
+              // Empty state
               <div className="flex-1">
                 <div className="h-full flex flex-col items-center justify-center bg-white shadow rounded p-4">
-                  <img
-                    src="/no_conversacion.svg"
-                    alt="Sin Conversación"
-                    className="w-48 mb-4"
-                  />
-                  <p className="text-gray-500 text-center">
-                    Selecciona una conversación para empezar a enviar mensajes
-                  </p>
+                  <img src="/no_conversacion.svg" alt="Sin Conversación" className="w-48 mb-4" />
+                  <p className="text-gray-500 text-center">Selecciona una conversación para empezar a enviar mensajes</p>
                 </div>
               </div>
             )}
           </div>
         </div>
 
+        {/* Confirm Close Modal */}
         {showConfirmClose && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 animate-fadeIn">
             <div className="bg-white p-6 rounded shadow-lg text-center">
               <p className="mb-4 font-semibold text-lg">¿Estás Seguro/a?</p>
               <div className="flex justify-center gap-4">
-                <button
-                  onClick={() => setShowConfirmClose(false)}
-                  className="px-4 py-2 bg-gray-200 rounded"
-                >
-                  No
-                </button>
+                <button onClick={() => setShowConfirmClose(false)} className="px-4 py-2 bg-gray-200 rounded">No</button>
                 <button
                   onClick={async () => {
-                    await supabase
-                      .from("contactos")
-                      .update({ estado: "Cerrado" })
-                      .in("session_id", selectedIds);
+                    await supabase.from("contactos").update({ estado: "Cerrado" }).in("session_id", selectedIds);
                     setShowConfirmClose(false);
                     setShowDeletedToast(true);
                     setSelectedIds([]);
@@ -682,30 +800,17 @@ export default function ChatPage() {
                     setTimeout(() => setShowDeletedToast(false), 5000);
                   }}
                   className="px-4 py-2 bg-red-500 text-white rounded"
-                >
-                  Sí
-                </button>
+                >Sí</button>
               </div>
             </div>
           </div>
         )}
 
-        {showDeletedToast && (
-          <div className="fixed bottom-4 left-4 bg-white border border-gray-300 p-4 rounded shadow-lg animate-fadeIn">
-            Contacto Cerrado
-          </div>
-        )}
-        {showAssignedToast && (
-          <div className="fixed bottom-4 left-4 bg-white border border-gray-300 p-4 rounded shadow-lg animate-fadeIn">
-            Contacto Asignado
-          </div>
-        )}
-        {showReopenedToast && (
-          <div className="fixed bottom-4 left-4 bg-white border border-gray-300 p-4 rounded shadow-lg animate-fadeIn">
-            Conversación Reabierta
-          </div>
-        )}
+        {showDeletedToast && <div className="fixed bottom-4 left-4 bg-white border p-4 rounded shadow-lg animate-fadeIn">Contacto Cerrado</div>}
+        {showAssignedToast && <div className="fixed bottom-4 left-4 bg-white border p-4 rounded shadow-lg animate-fadeIn">Contacto Asignado</div>}
+        {showReopenedToast && <div className="fixed bottom-4 left-4 bg-white border p-4 rounded shadow-lg animate-fadeIn">Conversación Reabierta</div>}
       </div>
     </>
   );
 }
+  

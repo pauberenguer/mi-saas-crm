@@ -9,8 +9,10 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@ffmpeg/ffmpeg": "^0.12.15",
     "@heroicons/react": "^2.2.0",
     "@supabase/supabase-js": "^2.49.4",
+    "browser-image-compression": "^2.0.2",
     "emoji-picker-react": "^4.12.2",
     "exif-js": "^2.3.0",
     "exifr": "^7.1.3",

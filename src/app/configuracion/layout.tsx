@@ -90,6 +90,22 @@ export default function ConfiguracionLayout({
                 >
                   Whatsapp
                 </Link>
+
+                {/* Título: Sonido */}
+                <span className="block px-2 py-1 text-base font-medium text-gray-900">
+                  Sonido
+                </span>
+
+                <Link
+                  href="/configuracion/notificaciones"
+                  className={
+                    pathname.startsWith("/configuracion/notificaciones")
+                      ? `${baseLink} bg-gray-200 text-gray-900`
+                      : `${baseLink} text-gray-700 hover:bg-gray-100`
+                  }
+                >
+                  Notificaciones
+                </Link>
               </nav>
             </aside>
           )}
