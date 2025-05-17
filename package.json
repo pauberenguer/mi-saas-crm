@@ -9,16 +9,21 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@ffmpeg/ffmpeg": "^0.12.15",
     "@heroicons/react": "^2.2.0",
     "@supabase/supabase-js": "^2.49.4",
+    "browser-image-compression": "^2.0.2",
     "emoji-picker-react": "^4.12.2",
     "exif-js": "^2.3.0",
     "exifr": "^7.1.3",
+    "install": "^0.13.0",
     "lucide-react": "^0.488.0",
     "next": "15.3.0",
+    "npm": "^11.4.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "tus-js-client": "^4.3.1"
+    "tus-js-client": "^4.3.1",
+    "y": "^0.3.2"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",
