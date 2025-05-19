@@ -1,7 +1,7 @@
 // src/components/Conversation.tsx
 "use client";
 
-import React, { useState, useEffect, useRef, ChangeEvent } from "react";
+import React, { useState, useEffect, useRef, useMemo, ChangeEvent } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/utils/supabaseClient";
 import imageCompression from "browser-image-compression";
@@ -77,9 +77,6 @@ export default function Conversation({
   const [paused, setPaused] = useState(false);
   const [elapsed, setElapsed] = useState(0);
 
-  // Flag para omitir el siguiente mensaje human tras un AI con etiqueta fotos:true
-  const skipNextHumanRef = useRef(false);
-
   // Avatar propio
   const [ownAvatarUrl, setOwnAvatarUrl] = useState<string | null>(null);
 
@@ -136,8 +133,8 @@ export default function Conversation({
   // Origen del mensaje para additional_kwargs
   const messageOrigin = messageMode === "Nota" ? "note" : "crm";
 
-  // ==========================================================================
-  // 1) Obtener avatar y plantillas
+  // ==========================================================================  
+  // 1) Obtener avatar y plantillas  
   // ==========================================================================
   useEffect(() => {
     supabase.auth.getUser()
@@ -161,8 +158,8 @@ export default function Conversation({
       });
   }, []);
 
-  // ==========================================================================
-  // 2) Fetch inicial de mensajes
+  // ==========================================================================  
+  // 2) Fetch inicial de mensajes  
   // ==========================================================================
   const fetchMessages = async () => {
     const { data, error } = await supabase
@@ -170,7 +167,26 @@ export default function Conversation({
       .select("*")
       .eq("session_id", contactId)
       .order("id", { ascending: true });
-    if (!error) setMessages(data || []);
+    if (!error && data) {
+      const filtered: any[] = [];
+      let skipNext = false;
+      for (const row of data) {
+        try {
+          const m = typeof row.message === "string" ? JSON.parse(row.message) : row.message;
+          if (skipNext && m.type === "human" && !m.etiquetas?.imagen && !m.etiquetas?.audio) {
+            skipNext = false;
+            continue;
+          }
+          filtered.push(row);
+          if (m.etiquetas?.imagen || m.etiquetas?.audio) {
+            skipNext = true;
+          }
+        } catch {
+          filtered.push(row);
+        }
+      }
+      setMessages(filtered);
+    }
   };
 
   useEffect(() => {
@@ -187,12 +203,11 @@ export default function Conversation({
     setSelectedDocs([]);
     setDocPreviews([]);
     setElapsed(0);
-    skipNextHumanRef.current = false;
     fetchMessages();
   }, [contactId]);
 
-  // ==========================================================================
-  // 3) Suscripción realtime con lógica de omisión de un mensaje human
+  // ==========================================================================  
+  // 3) Suscripción realtime con lógica de omisión de un mensaje human tras media  
   // ==========================================================================
   useEffect(() => {
     if (!contactId) return;
@@ -204,12 +219,14 @@ export default function Conversation({
         ({ new: row }) => {
           try {
             const m = typeof row.message === "string" ? JSON.parse(row.message) : row.message;
-            if (m.type === "ai" && m.etiquetas?.fotos) {
-              skipNextHumanRef.current = true;
+            if (m.etiquetas?.imagen || m.etiquetas?.audio) {
               setMessages(prev => [...prev, row]);
-            } else if (m.type === "human" && skipNextHumanRef.current) {
-              skipNextHumanRef.current = false;
             } else {
+              const last = messages[messages.length - 1];
+              const prevMsg = last ? (typeof last.message === "string" ? JSON.parse(last.message) : last.message) : null;
+              if (prevMsg && (prevMsg.etiquetas?.imagen || prevMsg.etiquetas?.audio) && m.type === "human" && !m.etiquetas?.imagen && !m.etiquetas?.audio) {
+                return;
+              }
               setMessages(prev => [...prev, row]);
             }
           } catch {
@@ -221,10 +238,10 @@ export default function Conversation({
     return () => {
       supabase.removeChannel(chan);
     };
-  }, [contactId]);
+  }, [contactId, messages]);
 
-  // ==========================================================================
-  // 4) Verificar bloqueo 24h
+  // ==========================================================================  
+  // 4) Verificar bloqueo 24h  
   // ==========================================================================
   useEffect(() => {
     let timer: ReturnType<typeof setInterval>;
@@ -249,15 +266,15 @@ export default function Conversation({
     return () => clearInterval(timer);
   }, [contactId]);
 
-  // ==========================================================================
-  // 5) Scroll automático
+  // ==========================================================================  
+  // 5) Scroll automático  
   // ==========================================================================
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // ==========================================================================
-  // 6) Seleccionar plantilla
+  // ==========================================================================  
+  // 6) Seleccionar plantilla  
   // ==========================================================================
   const handleSelectTemplate = async (tpl: TemplateItem) => {
     const { data, error } = await supabase
@@ -281,8 +298,8 @@ export default function Conversation({
     return () => document.removeEventListener("mousedown", onClickOutside);
   }, []);
 
-  // ==========================================================================
-  // 7) Imágenes + previsualización (solo .png/.jpg/.jpeg ≤ 25MB)
+  // ==========================================================================  
+  // 7) Imágenes + previsualización (solo .png/.jpg/.jpeg ≤ 25MB)  
   // ==========================================================================
   const handleImageClick = () => imageInputRef.current?.click();
   const handleImageChange = (e: ChangeEvent<HTMLInputElement>) => {
@@ -322,8 +339,8 @@ export default function Conversation({
     setImagePreviews(prev => prev.filter((_, idx) => idx !== i));
   };
 
-  // ==========================================================================
-  // 8) Vídeos + previsualización
+  // ==========================================================================  
+  // 8) Vídeos + previsualización  
   // ==========================================================================
   const handleVideoClick = () => videoInputRef.current?.click();
   const handleVideoChange = (e: ChangeEvent<HTMLInputElement>) => {
@@ -341,8 +358,8 @@ export default function Conversation({
     setVideoPreviews(prev => prev.filter((_, idx) => idx !== i));
   };
 
-  // ==========================================================================
-  // 9) Documentos (PDF, DOC, DOCX) + previsualización
+  // ==========================================================================  
+  // 9) Documentos (PDF, DOCX) + previsualización  
   // ==========================================================================
   const handleFileClick = () => docInputRef.current?.click();
   const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
@@ -360,8 +377,8 @@ export default function Conversation({
     setDocPreviews(prev => prev.filter((_, idx) => idx !== i));
   };
 
-  // ==========================================================================
-  // 10) Grabación de audio + envío con contentType correcto
+  // ==========================================================================  
+  // 10) Grabación de audio + envío con contentType correcto  
   // ==========================================================================
   const startRecording = async () => {
     canceledRef.current = false;
@@ -400,7 +417,7 @@ export default function Conversation({
       const fileName = `audio_${Date.now()}.ogg`;
       const file = new File([finalBlob], fileName, { type: finalBlob.type });
 
-      // Aquí indicamos contentType para que Supabase guarde metadata correcta
+      // Subida a Supabase
       const path = `${contactId}/${Date.now()}_${file.name}`;
       await supabase
         .storage
@@ -468,8 +485,8 @@ export default function Conversation({
     }
   };
 
-  // ==========================================================================
-  // 11) Enviar mensaje (imágenes, vídeos, docs, texto)
+  // ==========================================================================  
+  // 11) Enviar mensaje (imágenes, vídeos, docs, texto, plantillas)  
   // ==========================================================================
   const sendMessage = async () => {
     if (recording) {
@@ -489,6 +506,7 @@ export default function Conversation({
             response_metadata: {},
           },
         }]);
+        // Webhook de plantilla
         await fetch("https://n8n.asisttente.com/webhook/elgloboenviarplantilla", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -618,7 +636,9 @@ export default function Conversation({
         response_metadata: {},
       },
     }]);
-    if (messageMode === "Responder" && !isLocked) {
+
+    // Sólo disparar el webhook de bot cuando NO es plantilla
+    if (messageMode === "Responder" && !isLocked && !selectedTpl) {
       await fetch("https://n8n.asisttente.com/webhook/elglobobot", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -629,16 +649,43 @@ export default function Conversation({
         .update({ is_paused: true })
         .eq("session_id", contactId);
     }
+
+    // Si se envía plantilla, sólo el webhook de plantilla
     if (selectedTpl) {
-      await fetch("https://n8n.asisttente.com/webhook/elgloboboenviarplantilla", {
+      await fetch("https://n8n.asisttente.com/webhook/elgloboenviarplantilla", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ plantilla: selectedTpl.name, session_id: contactId }),
       }).catch(console.error);
     }
+
     setNewMessage("");
     setSelectedTpl(null);
   };
+
+  // ============================================================================  
+  // Filtrado previo al renderizado: omitimos descripción tras media  
+  // ============================================================================
+  const filteredMessages = useMemo(() => {
+    const out: any[] = [];
+    let skipNext = false;
+    for (const row of messages) {
+      try {
+        const m = typeof row.message === "string" ? JSON.parse(row.message) : row.message;
+        if (skipNext && m.type === "human" && !m.etiquetas?.imagen && !m.etiquetas?.audio) {
+          skipNext = false;
+          continue;
+        }
+        out.push(row);
+        if (m.etiquetas?.imagen || m.etiquetas?.audio) {
+          skipNext = true;
+        }
+      } catch {
+        out.push(row);
+      }
+    }
+    return out;
+  }, [messages]);
 
   return (
     <div className="flex flex-col h-full" ref={menuRef}>
@@ -670,9 +717,8 @@ export default function Conversation({
 
       {/* Conversación */}
       <div className="h-[568px] overflow-y-auto p-4 mb-2">
-        {messages.map(msg => {
-          const m = typeof msg.message === "string" ? JSON.parse(msg.message) : msg.
-          message;
+        {filteredMessages.map(msg => {
+          const m = typeof msg.message === "string" ? JSON.parse(msg.message) : msg.message;
           const ts = msg.created_at ? new Date(msg.created_at).toLocaleString() : "";
           const origin = m.additional_kwargs?.origin;
           const isCust = m.type === "human" && !origin;
@@ -834,28 +880,9 @@ export default function Conversation({
           />
           {messageMode==="Responder" && (imagePreviews.length>0||videoPreviews.length>0||docPreviews.length>0) && (
             <div className="absolute top-0 left-0 h-full flex items-center space-x-2 pl-2">
-              {imagePreviews.map((src,idx)=>(
-
-                <div key={`img-${idx}`} className="relative w-10 h-10">
-                  <img src={src} alt={`preview-${idx}`} className="w-10 h-10 object-cover rounded"/>
-                  <button onClick={()=>removeImageAt(idx)} className="absolute -top-1 -right-1 w-4 h-4 flex items-center justify-center bg-black text-white rounded-full text-xs">×</button>
-                </div>
-              ))}
-              {videoPreviews.map((src,idx)=>(
-
-                <div key={`vid-${idx}`} className="relative w-10 h-10">
-                  <video src={src} muted loop className="w-10 h-10 object-cover rounded"/>
-                  <button onClick={()=>removeVideoAt(idx)} className="absolute -top-1 -right-1 w-4 h-4 flex items-center justify-center bg-black text-white rounded-full text-xs">×</button>
-                </div>
-              ))}
-              {docPreviews.map((src,idx)=>(
-
-                <div key={`doc-${idx}`} className="relative flex items-center space-x-1">
-                  <FileText size={18} color="#818b9c"/>
-                  <a href={src} target="_blank" rel="noopener noreferrer" className="text-xs truncate max-w-[4rem]">{selectedDocs[idx].name}</a>
-                  <button onClick={()=>removeDocAt(idx)} className="absolute -top-1 -right-1 w-4 h-4 flex items-center justify-center bg-black text-white rounded-full text-xs">×</button>
-                </div>
-              ))}
+              {imagePreviews.map((src,idx)=>(<div key={`img-${idx}`} className="relative w-10 h-10"><img src={src} alt={`preview-${idx}`} className="w-10 h-10 object-cover rounded"/><button onClick={()=>removeImageAt(idx)} className="absolute -top-1 -right-1 w-4 h-4 flex items-center justify-center bg-black text-white rounded-full text-xs">×</button></div>))}
+              {videoPreviews.map((src,idx)=>(<div key={`vid-${idx}`} className="relative w-10 h-10"><video src={src} muted loop className="w-10 h-10 object-cover rounded"/><button onClick={()=>removeVideoAt(idx)} className="absolute -top-1 -right-1 w-4 h-4 flex items-center justify-center bg-black text-white rounded-full text-xs">×</button></div>))}
+              {docPreviews.map((src,idx)=>(<div key={`doc-${idx}`} className="relative flex items-center space-x-1"><FileText size={18} color="#818b9c"/><a href={src} target="_blank" rel="noopener noreferrer" className="text-xs truncate max-w-[4rem]">{selectedDocs[idx].name}</a><button onClick={()=>removeDocAt(idx)} className="absolute -top-1 -right-1 w-4 h-4 flex items-center justify-center bg-black text-white rounded-full text-xs">×</button></div>))}
             </div>
           )}
         </div>

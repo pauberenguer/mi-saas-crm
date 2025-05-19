@@ -19,7 +19,6 @@ export interface Contact {
   last_customer_message: string;
   estado?: "Abierto" | "Cerrado";
   etiquetas?: Record<string, string>;
-  // <-- Añadido para reflejar asignación
   assigned_to?: string | null;
 }
 
@@ -52,6 +51,7 @@ export default function ContactListMini({
 }: ContactListMiniProps) {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [counts, setCounts] = useState<Record<string, number>>({});
   const [selectedFolder, setSelectedFolder] = useState<string | null>(null);
   const [lastMessageAt, setLastMessageAt] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
@@ -62,25 +62,23 @@ export default function ContactListMini({
   const [showFilterInput, setShowFilterInput] = useState(false);
   const [filterCondition, setFilterCondition] = useState("");
   const [sortMenuOpen, setSortMenuOpen] = useState(false);
-  const [sortOrder, setSortOrder] = useState<"reciente" | "antiguo">("antiguo");
+  // Cambio: por defecto ordenamos de más reciente a más antiguo
+  const [sortOrder, setSortOrder] = useState<"reciente" | "antiguo">("reciente");
 
   const statusMenuRef = useRef<HTMLDivElement>(null);
   const sortMenuRef = useRef<HTMLDivElement>(null);
 
-  // Título dinámico según filtro y carpeta (equipo)
   const headerTitle =
     filter === "Equipo" && selectedFolder
       ? profiles.find((p) => p.id === selectedFolder)?.name || filter
       : filter;
 
-  // Actualizar "ahora" cada minuto
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 60000);
     return () => clearInterval(id);
   }, []);
 
-  // Cerrar menús externos
   useEffect(() => {
     if (!statusMenuOpen) return;
     const handler = (e: MouseEvent) => {
@@ -103,7 +101,6 @@ export default function ContactListMini({
     return () => document.removeEventListener("mousedown", handler);
   }, [sortMenuOpen]);
 
-  // Reset sub-filtros al cambiar filtro principal
   useEffect(() => {
     setStatusFilter("Todos");
     setStatusMenuOpen(false);
@@ -154,7 +151,6 @@ export default function ContactListMini({
       const { data } = await query.order("name", { ascending: true });
       if (data) setContacts(data as Contact[]);
 
-      // Cargar timestamp del último mensaje de cada conversación
       const times: Record<string, string> = {};
       await Promise.all(
         (data || []).map(async (c) => {
@@ -227,17 +223,14 @@ export default function ContactListMini({
                       estado: (upd as any).estado,
                       etiquetas: (upd as any).etiquetas,
                       last_viewed_at: (upd as any).last_viewed_at,
-                      assigned_to: (upd as any).assigned_to,  // <-- Actualiza asignación
+                      assigned_to: (upd as any).assigned_to,
                     }
                   : c
               )
               .filter((c) => {
-                // Filtrar Cerrados si no estoy en 'Todos'
                 if (filter !== "Todos" && c.estado === "Cerrado") return false;
-                // Filtrar por estado en 'Todos'
                 if (filter === "Todos" && statusFilter !== "Todos" && c.estado !== statusFilter)
                   return false;
-                // Filtro de asignación
                 if (filter === "No Asignado" && c.assigned_to != null) return false;
                 if (filter === "Tú" && c.assigned_to !== currentUser?.id) return false;
                 if (filter === "Equipo" && selectedFolder && c.assigned_to !== selectedFolder)
@@ -272,29 +265,38 @@ export default function ContactListMini({
     );
   };
 
-  // Reset de carpeta al cambiar filtro
   useEffect(() => {
     setSelectedFolder(null);
   }, [filter]);
 
-  // Cargar perfiles para filtro 'Equipo'
   useEffect(() => {
     if (filter !== "Equipo") return;
     setLoadingProfiles(true);
     supabase
       .from("profiles")
       .select("id,name")
-      .then(({ data }) => {
-        if (data) setProfiles(data as Profile[]);
+      .then(async ({ data }) => {
+        if (data) {
+          setProfiles(data as Profile[]);
+          const countsMap: Record<string, number> = {};
+          await Promise.all(
+            data.map(async (p) => {
+              const { count } = await supabase
+                .from("contactos")
+                .select("session_id", { head: true, count: "exact" })
+                .eq("assigned_to", p.id);
+              countsMap[p.id] = count ?? 0;
+            })
+          );
+          setCounts(countsMap);
+        }
         setLoadingProfiles(false);
       });
   }, [filter]);
 
   const allChecked = contacts.length > 0 && selectedIds!.length === contacts.length;
   const toggleAll = (chk: boolean) =>
-    onSelectionChange!(
-      chk ? contacts.map((c) => c.session_id) : []
-    );
+    onSelectionChange!(chk ? contacts.map((c) => c.session_id) : []);
   const toggleOne = (id: string, chk: boolean) => {
     const next = chk
       ? [...selectedIds!, id]
@@ -314,11 +316,14 @@ export default function ContactListMini({
           {profiles.map((p) => (
             <li
               key={p.id}
-              className="flex items-center py-2 cursor-pointer hover:bg-gray-50"
+              className="flex items-center justify-between py-2 cursor-pointer hover:bg-gray-50"
               onClick={() => setSelectedFolder(p.id)}
             >
-              <Folder className="w-5 h-5 text-gray-500 mr-3" />
-              <span className="text-gray-800">{p.name}</span>
+              <div className="flex items-center">
+                <Folder className="w-5 h-5 text-gray-500 mr-3" />
+                <span className="text-gray-800">{p.name}</span>
+              </div>
+              <span className="text-gray-500 text-sm">{counts[p.id] || 0}</span>
             </li>
           ))}
         </ul>
@@ -328,7 +333,6 @@ export default function ContactListMini({
   if (loading)
     return <div className="p-4 text-center text-gray-500">Cargando…</div>;
 
-  // Filtrado por búsqueda y etiquetas
   const filtered = contacts.filter((c) => {
     if (c.session_id === selectedContactId) return true;
     const term = searchTerm.trim().toLowerCase();
@@ -354,7 +358,6 @@ export default function ContactListMini({
     return true;
   });
 
-  // Ordenar por fecha de último mensaje
   const sorted = filtered.sort((a, b) => {
     const ta = lastMessageAt[a.session_id]
       ? new Date(lastMessageAt[a.session_id]).getTime()
