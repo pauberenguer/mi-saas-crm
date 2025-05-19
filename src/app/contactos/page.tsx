@@ -3,7 +3,7 @@
 
 import { useEffect, useState } from "react";
 import { supabase } from "../../utils/supabaseClient";
-import { Filter, Search } from "lucide-react";
+import { Filter, Search, Edit } from "lucide-react";
 import React from "react";
 
 interface Contact {
@@ -35,6 +35,16 @@ export default function ContactosPage() {
   const [profileNotes, setProfileNotes] = useState<Note[]>([]);
   const [showActionsMenu, setShowActionsMenu] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+
+  // Nuevos estados para edición de nombre
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [editedName, setEditedName] = useState("");
+
+  // Reiniciar estado de edición al abrir/cerrar modal de perfil
+  useEffect(() => {
+    setIsEditingName(false);
+    setEditedName("");
+  }, [selectedProfile]);
 
   // Conteo de etiquetas
   const tagCounts: Record<string, number> = {};
@@ -117,6 +127,40 @@ export default function ContactosPage() {
   const handleRowClick = (c: Contact, e: React.MouseEvent) => {
     if ((e.target as HTMLElement).tagName.toLowerCase() === "input") return;
     setSelectedProfile(c);
+  };
+
+  // Funciones para editar nombre
+  const handleStartEditName = () => {
+    if (!selectedProfile) return;
+    setEditedName(selectedProfile.name);
+    setIsEditingName(true);
+  };
+  const handleCancelEditName = () => {
+    setIsEditingName(false);
+    setEditedName("");
+  };
+  const handleSaveName = async () => {
+    if (!selectedProfile) return;
+    const { error } = await supabase
+      .from("contactos")
+      .update({ name: editedName })
+      .eq("session_id", selectedProfile.session_id);
+    if (error) {
+      console.error(error);
+    } else {
+      // Actualizar estado local
+      setContacts(prev =>
+        prev.map(c =>
+          c.session_id === selectedProfile.session_id
+            ? { ...c, name: editedName }
+            : c
+        )
+      );
+      setSelectedProfile(prev =>
+        prev ? { ...prev, name: editedName } : prev
+      );
+      setIsEditingName(false);
+    }
   };
 
   // Eliminar seleccionados
@@ -396,6 +440,7 @@ export default function ContactosPage() {
               className="bg-white rounded-lg shadow-xl p-6 max-w-md w-full transform transition hover:scale-105 z-50 animate-fadeIn"
               onClick={e => e.stopPropagation()}
             >
+              {/* Cabecera Modal */}
               <div className="flex justify-between items-center mb-4">
                 <h2 className="text-2xl font-bold text-gray-800">Perfil</h2>
                 <button
@@ -405,19 +450,58 @@ export default function ContactosPage() {
                   &times;
                 </button>
               </div>
+              {/* Cuerpo Modal */}
               <div className="flex flex-col items-center">
                 <img
                   src="/avatar-placeholder.png"
                   alt={selectedProfile.name}
                   className="w-24 h-24 rounded-full object-cover mb-4"
                 />
-                <h3 className="text-xl font-semibold text-gray-800 mb-1">
-                  {selectedProfile.name}
-                </h3>
+                {/* Nombre y edición */}
+                <div className="flex items-center space-x-2 mb-2">
+                  {isEditingName ? (
+                    <input
+                      type="text"
+                      value={editedName}
+                      onChange={e => setEditedName(e.target.value)}
+                      onKeyDown={e => {
+                        if (e.key === "Enter") {
+                          handleSaveName();
+                        }
+                      }}
+                      className="border rounded px-2 py-1 focus:ring-2 focus:ring-blue-500"
+                    />
+                  ) : (
+                    <h3 className="text-xl font-semibold text-gray-800">
+                      {selectedProfile.name}
+                    </h3>
+                  )}
+                  <button
+                    onClick={isEditingName ? handleSaveName : handleStartEditName}
+                    className="text-blue-500 hover:text-blue-700 focus:outline-none"
+                  >
+                    <Edit size={20} />
+                  </button>
+                  {isEditingName && (
+                    <>
+                      <button
+                        onClick={handleSaveName}
+                        className="text-blue-500 hover:text-blue-700 focus:outline-none"
+                      >
+                        Aceptar
+                      </button>
+                      <button
+                        onClick={handleCancelEditName}
+                        className="text-gray-500 hover:text-gray-700 focus:outline-none"
+                      >
+                        Cancelar
+                      </button>
+                    </>
+                  )}
+                </div>
                 <p className="text-gray-600">{selectedProfile.session_id}</p>
                 <p className="text-gray-600 mt-2">
-                  Suscrito:{" "}
-                  {new Date(selectedProfile.created_at).toLocaleDateString()}
+                  Suscrito: {new Date(selectedProfile.created_at).toLocaleDateString()}
                 </p>
 
                 {/* Etiquetas */}

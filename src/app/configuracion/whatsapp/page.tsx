@@ -249,15 +249,15 @@ export default function WhatsappPage() {
         </div>
       </div>
 
-      {/* Tabla */}
-      <div className="overflow-x-auto bg-white rounded shadow">
-        <table className="min-w-full divide-y divide-gray-200">
-          <thead className="bg-gray-50">
-            <tr>
-              <th className="px-4 py-2 text-center">
+      {/* Tabla (estilo adaptado de contactos/page) */}
+      <div className="overflow-x-auto bg-white p-4 rounded shadow transition animate-fadeIn">
+        <table className="min-w-full border-collapse">
+          <thead>
+            <tr className="bg-blue-50">
+              <th className="px-1 py-1 text-center">
                 <input
                   type="checkbox"
-                  className="h-4 w-4 text-blue-600 rounded"
+                  className="h-5 w-5 rounded border border-gray-300 checked:bg-gradient-to-br checked:from-blue-500 checked:to-blue-700 transition"
                   checked={allSelected}
                   onChange={handleSelectAll}
                 />
@@ -265,20 +265,19 @@ export default function WhatsappPage() {
               {["Nombre", "Categoría", "Idioma", "Estado"].map((h) => (
                 <th
                   key={h}
-                  className="px-6 py-2 text-left text-xs font-medium text-gray-500 uppercase"
+                  className="px-1 py-1 text-center"
                 >
                   {h}
                 </th>
               ))}
-              {/* Columna de acciones eliminada */}
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-200">
+          <tbody>
             {templates.length === 0 ? (
               <tr>
                 <td
                   colSpan={5}
-                  className="px-6 py-4 text-center text-sm text-gray-500"
+                  className="px-1 py-1 text-center text-sm text-gray-500"
                 >
                   No hay plantillas.
                 </td>
@@ -286,21 +285,20 @@ export default function WhatsappPage() {
             ) : (
               templates.map((tpl) => (
                 <tr key={tpl.name}>
-                  <td className="px-4 py-2 text-center">
+                  <td className="px-1 py-1 text-center">
                     <input
                       type="checkbox"
-                      className="h-4 w-4 text-blue-600 rounded"
+                      className="h-5 w-5 rounded border border-gray-300 checked:bg-gradient-to-br checked:from-blue-500 checked:to-blue-700 transition"
                       checked={selected.has(tpl.name)}
                       onChange={(e) => handleSelectOne(e, tpl.name)}
                     />
                   </td>
-                  <td className="px-6 py-2 whitespace-nowrap">{tpl.name}</td>
-                  <td className="px-6 py-2 whitespace-nowrap">{tpl.category}</td>
-                  <td className="px-6 py-2 whitespace-nowrap">{tpl.language}</td>
-                  <td className="px-6 py-2 whitespace-nowrap text-green-600">
+                  <td className="px-1 py-1 text-center">{tpl.name}</td>
+                  <td className="px-1 py-1 text-center">{tpl.category}</td>
+                  <td className="px-1 py-1 text-center">{tpl.language}</td>
+                  <td className="px-1 py-1 text-center text-green-600">
                     ✓ Aprobado
                   </td>
-                  {/* Botón de 3 puntos eliminado */}
                 </tr>
               ))
             )}

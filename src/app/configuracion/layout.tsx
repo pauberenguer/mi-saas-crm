@@ -12,13 +12,10 @@ export default function ConfiguracionLayout({
 }) {
   const pathname = usePathname();
   const baseLink = "block rounded px-2 py-1 transition-colors text-sm";
-
-  // Ocultamos el sidebar si estamos en la ruta de crear plantilla
   const hideSidebar = pathname === "/configuracion/whatsapp/crear_plantilla";
 
   return (
     <>
-      {/* Definición de la animación fadeIn */}
       <style jsx>{`
         @keyframes fadeIn {
           from {
@@ -34,25 +31,20 @@ export default function ConfiguracionLayout({
           animation: fadeIn 0.5s ease-in-out forwards;
         }
       `}</style>
-
       <div className="min-h-screen bg-gray-50 p-8">
-        {/* Header de Configuración */}
         <header className="animate-fadeIn mb-2">
           <h1 className="text-3xl font-bold" style={{ color: "#1d1d1d" }}>
             Configuración
           </h1>
         </header>
         <hr className="border-t mb-4" style={{ borderColor: "#4d4d4d" }} />
-
         <div className="flex">
           {!hideSidebar && (
             <aside className="w-60 pr-6 border-r border-gray-200">
               <nav className="space-y-4">
-                {/* Título: General */}
                 <span className="block px-2 py-1 text-base font-medium text-gray-900">
                   General
                 </span>
-
                 <Link
                   href="/configuracion/perfil"
                   className={
@@ -63,7 +55,6 @@ export default function ConfiguracionLayout({
                 >
                   Perfil
                 </Link>
-
                 <Link
                   href="/configuracion/miembros"
                   className={
@@ -74,12 +65,9 @@ export default function ConfiguracionLayout({
                 >
                   Miembros del Equipo
                 </Link>
-
-                {/* Título: Automatización */}
                 <span className="block px-2 py-1 text-base font-medium text-gray-900">
                   Automatización
                 </span>
-
                 <Link
                   href="/configuracion/whatsapp"
                   className={
@@ -90,10 +78,22 @@ export default function ConfiguracionLayout({
                 >
                   Whatsapp
                 </Link>
+                <span className="block px-2 py-1 text-base font-medium text-gray-900">
+                  Sonido
+                </span>
+                <Link
+                  href="/configuracion/notificaciones"
+                  className={
+                    pathname.startsWith("/configuracion/notificaciones")
+                      ? `${baseLink} bg-gray-200 text-gray-900`
+                      : `${baseLink} text-gray-700 hover:bg-gray-100`
+                  }
+                >
+                  Notificaciones
+                </Link>
               </nav>
             </aside>
           )}
-
           <main className={hideSidebar ? "w-full pl-0" : "flex-1 pl-6"}>
             {children}
           </main>

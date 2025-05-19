@@ -1,8 +1,7 @@
 // src/components/ContactListMini.tsx
 "use client";
 
-import React from "react";
-import { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { supabase } from "../utils/supabaseClient";
 import {
   ChevronDown,
@@ -20,6 +19,8 @@ export interface Contact {
   last_customer_message: string;
   estado?: "Abierto" | "Cerrado";
   etiquetas?: Record<string, string>;
+  // <-- Añadido para reflejar asignación
+  assigned_to?: string | null;
 }
 
 export interface Profile {
@@ -66,12 +67,20 @@ export default function ContactListMini({
   const statusMenuRef = useRef<HTMLDivElement>(null);
   const sortMenuRef = useRef<HTMLDivElement>(null);
 
+  // Título dinámico según filtro y carpeta (equipo)
+  const headerTitle =
+    filter === "Equipo" && selectedFolder
+      ? profiles.find((p) => p.id === selectedFolder)?.name || filter
+      : filter;
+
+  // Actualizar "ahora" cada minuto
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 60000);
     return () => clearInterval(id);
   }, []);
 
+  // Cerrar menús externos
   useEffect(() => {
     if (!statusMenuOpen) return;
     const handler = (e: MouseEvent) => {
@@ -94,6 +103,7 @@ export default function ContactListMini({
     return () => document.removeEventListener("mousedown", handler);
   }, [sortMenuOpen]);
 
+  // Reset sub-filtros al cambiar filtro principal
   useEffect(() => {
     setStatusFilter("Todos");
     setStatusMenuOpen(false);
@@ -104,22 +114,27 @@ export default function ContactListMini({
 
   const diffSeconds = (ts?: string) =>
     ts ? (now - new Date(ts).getTime()) / 1000 : Infinity;
+
   const formatDiff = (sec: number) => {
-    if (sec < 60) return "0 min";
-    if (sec < 3600) return `${Math.floor(sec / 60)} min`;
-    return `${Math.floor(sec / 3600)} h`;
+    if (sec < 60) return "0 m";
+    if (sec < 3600) return `${Math.floor(sec / 60)} m`;
+    if (sec < 86400) return `${Math.floor(sec / 3600)} h`;
+    return `${Math.floor(sec / 86400)} d`;
   };
+
   const truncate = (str: string, max = 28) =>
     str.length > max ? str.slice(0, max) + "..." : str;
 
-  // Fetch contacts + last viewed
+  // ----------------------------
+  // Fetch inicial de contactos
+  // ----------------------------
   useEffect(() => {
     (async () => {
       setLoading(true);
       let query = supabase
         .from("contactos")
         .select(
-          "session_id,name,created_at,is_paused,last_viewed_at,last_customer_message,estado,etiquetas"
+          "session_id,name,created_at,is_paused,last_viewed_at,last_customer_message,estado,etiquetas,assigned_to"
         );
 
       if (filter !== "Todos") {
@@ -139,6 +154,7 @@ export default function ContactListMini({
       const { data } = await query.order("name", { ascending: true });
       if (data) setContacts(data as Contact[]);
 
+      // Cargar timestamp del último mensaje de cada conversación
       const times: Record<string, string> = {};
       await Promise.all(
         (data || []).map(async (c) => {
@@ -156,7 +172,9 @@ export default function ContactListMini({
     })();
   }, [filter, currentUser?.id, selectedFolder, statusFilter]);
 
-  // Update lastMessageAt on new messages
+  // ----------------------------
+  // Escuchar INSERT en conversaciones
+  // ----------------------------
   useEffect(() => {
     const chan = supabase
       .channel("convos-changes")
@@ -184,10 +202,14 @@ export default function ContactListMini({
         }
       )
       .subscribe();
-    return () => { void supabase.removeChannel(chan); };
+    return () => {
+      void supabase.removeChannel(chan);
+    };
   }, []);
 
-  // Subscribe to contact updates, including last_viewed_at
+  // ----------------------------
+  // Escuchar UPDATE en contactos (incluye assigned_to)
+  // ----------------------------
   useEffect(() => {
     const chan = supabase
       .channel("contactos-updates")
@@ -197,18 +219,6 @@ export default function ContactListMini({
         ({ new: upd }) => {
           setContacts((prev) =>
             prev
-              .filter((c) =>
-                filter !== "Todos" && upd.estado === "Cerrado"
-                  ? c.session_id !== upd.session_id
-                  : true
-              )
-              .filter((c) =>
-                filter === "Todos" &&
-                statusFilter !== "Todos" &&
-                upd.estado !== statusFilter
-                  ? c.session_id !== upd.session_id
-                  : true
-              )
               .map((c) =>
                 c.session_id === upd.session_id
                   ? {
@@ -217,16 +227,35 @@ export default function ContactListMini({
                       estado: (upd as any).estado,
                       etiquetas: (upd as any).etiquetas,
                       last_viewed_at: (upd as any).last_viewed_at,
+                      assigned_to: (upd as any).assigned_to,  // <-- Actualiza asignación
                     }
                   : c
               )
+              .filter((c) => {
+                // Filtrar Cerrados si no estoy en 'Todos'
+                if (filter !== "Todos" && c.estado === "Cerrado") return false;
+                // Filtrar por estado en 'Todos'
+                if (filter === "Todos" && statusFilter !== "Todos" && c.estado !== statusFilter)
+                  return false;
+                // Filtro de asignación
+                if (filter === "No Asignado" && c.assigned_to != null) return false;
+                if (filter === "Tú" && c.assigned_to !== currentUser?.id) return false;
+                if (filter === "Equipo" && selectedFolder && c.assigned_to !== selectedFolder)
+                  return false;
+                return true;
+              })
           );
         }
       )
       .subscribe();
-    return () => { void supabase.removeChannel(chan); };
-  }, [filter, statusFilter]);
+    return () => {
+      void supabase.removeChannel(chan);
+    };
+  }, [filter, statusFilter, currentUser?.id, selectedFolder]);
 
+  // ----------------------------
+  // Selección de fila
+  // ----------------------------
   const handleSelect = async (c: Contact) => {
     onSelect(c);
     const nowIso = new Date().toISOString();
@@ -243,10 +272,12 @@ export default function ContactListMini({
     );
   };
 
+  // Reset de carpeta al cambiar filtro
   useEffect(() => {
     setSelectedFolder(null);
   }, [filter]);
 
+  // Cargar perfiles para filtro 'Equipo'
   useEffect(() => {
     if (filter !== "Equipo") return;
     setLoadingProfiles(true);
@@ -259,10 +290,11 @@ export default function ContactListMini({
       });
   }, [filter]);
 
-  const allChecked =
-    contacts.length > 0 && selectedIds!.length === contacts.length;
+  const allChecked = contacts.length > 0 && selectedIds!.length === contacts.length;
   const toggleAll = (chk: boolean) =>
-    onSelectionChange!(chk ? contacts.map((c) => c.session_id) : []);
+    onSelectionChange!(
+      chk ? contacts.map((c) => c.session_id) : []
+    );
   const toggleOne = (id: string, chk: boolean) => {
     const next = chk
       ? [...selectedIds!, id]
@@ -272,10 +304,12 @@ export default function ContactListMini({
 
   if (loadingProfiles && filter === "Equipo" && !selectedFolder)
     return <div className="p-4 text-center text-gray-500">Cargando…</div>;
+
   if (filter === "Equipo" && selectedFolder === null)
     return (
       <div className="overflow-y-auto bg-white p-4 rounded shadow h-full">
-        <h3 className="mb-4 font-semibold text-gray-700">Miembros del Equipo</h3>
+        <div className="text-center mb-2 text-gray-600">{headerTitle}</div>
+        <hr className="border-t border-gray-300 mb-2" />
         <ul className="divide-y divide-gray-200">
           {profiles.map((p) => (
             <li
@@ -290,12 +324,13 @@ export default function ContactListMini({
         </ul>
       </div>
     );
+
   if (loading)
     return <div className="p-4 text-center text-gray-500">Cargando…</div>;
 
+  // Filtrado por búsqueda y etiquetas
   const filtered = contacts.filter((c) => {
     if (c.session_id === selectedContactId) return true;
-
     const term = searchTerm.trim().toLowerCase();
     if (
       term &&
@@ -304,7 +339,6 @@ export default function ContactListMini({
     ) {
       return false;
     }
-
     if (showFilterInput && filterCondition.trim()) {
       const tags = c.etiquetas
         ? Object.values(c.etiquetas).map((v) => v.toLowerCase())
@@ -320,6 +354,7 @@ export default function ContactListMini({
     return true;
   });
 
+  // Ordenar por fecha de último mensaje
   const sorted = filtered.sort((a, b) => {
     const ta = lastMessageAt[a.session_id]
       ? new Date(lastMessageAt[a.session_id]).getTime()
@@ -332,9 +367,10 @@ export default function ContactListMini({
 
   return (
     <div className="overflow-y-auto bg-white p-4 rounded shadow h-full">
-      <div className="text-center mb-2 text-gray-600">{filter}</div>
+      <div className="text-center mb-2 text-gray-600">{headerTitle}</div>
       <hr className="border-t border-gray-300 mb-2" />
 
+      {/* CONTROLES: selección múltiple, estado, búsqueda, orden */}
       <div className="flex items-center mb-2">
         <input
           type="checkbox"
@@ -394,10 +430,10 @@ export default function ContactListMini({
               className="mx-2 h-5 w-5 text-gray-600 cursor-pointer"
             />
           )}
-          <div ref={sortMenuRef} className="relative">
+          <div ref={sortMenuRef} className="relative ml-2">
             <ChevronsUpDown
               onClick={() => setSortMenuOpen((o) => !o)}
-              className="h-4 w-4 text-gray-600 cursor-pointer ml-2"
+              className="h-4 w-4 text-gray-600 cursor-pointer"
             />
             {sortMenuOpen && (
               <ul className="absolute right-0 mt-1 bg-white border border-gray-300 rounded shadow-lg z-10">

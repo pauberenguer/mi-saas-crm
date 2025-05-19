@@ -25,10 +25,6 @@ export default function HomeDashboard() {
       <div className="min-h-screen bg-[#f9fafb] p-8">
         {/* Pequeño header en la esquina superior izquierda */}
         <header className="animate-fadeIn mb-2">
-          {/*
-            Tamaño del header: text-3xl equivale a ~1.875rem,
-            que es 1.2× el tamaño base (1.5rem = text-2xl).
-          */}
           <h1 className="text-3xl font-bold" style={{ color: "#1d1d1d" }}>
             Inicio
           </h1>
@@ -49,7 +45,7 @@ export default function HomeDashboard() {
 
         {/* Tarjetas de navegación empujadas hacia abajo */}
         <div className="flex items-center justify-center pt-4 px-8">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8 max-w-6xl w-full animate-fadeIn">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-8 max-w-6xl w-full animate-fadeIn">
             {/* 1. Contactos */}
             <div className="bg-white shadow rounded-lg p-6 flex flex-col items-center justify-between transition-transform duration-500 hover:scale-105">
               <h2 className="text-2xl font-semibold text-gray-800 mb-4 text-center">
@@ -95,6 +91,22 @@ export default function HomeDashboard() {
                 className="inline-block bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded text-center"
               >
                 Ver Automatización
+              </a>
+            </div>
+
+            {/* 4. Configuración */}
+            <div className="bg-white shadow rounded-lg p-6 flex flex-col items-center justify-between transition-transform duration-500 hover:scale-105">
+              <h2 className="text-2xl font-semibold text-gray-800 mb-4 text-center">
+                Configuración
+              </h2>
+              <p className="text-gray-600 mb-6 text-center">
+                Ajusta las preferencias y parámetros de tu cuenta.
+              </p>
+              <a
+                href="/configuracion"
+                className="inline-block bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded text-center"
+              >
+                Ir a Configuración
               </a>
             </div>
           </div>

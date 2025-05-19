@@ -4,8 +4,9 @@
 import React from "react";
 import { useState, useEffect } from "react";
 import Image from "next/image";
-import { User, Loader2 } from "lucide-react";
+import { User, Loader2, Edit } from "lucide-react";
 import { supabase } from "../../../lib/supabaseClient";
+
 export default function PerfilPage() {
   const [user, setUser] = useState<any>(null);
   const [profile, setProfile] = useState<{ name: string; avatar_url: string | null } | null>(null);
@@ -13,6 +14,10 @@ export default function PerfilPage() {
   const [uploading, setUploading] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string>("");
+
+  // Estados para edición de nombre
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [editedName, setEditedName] = useState("");
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
@@ -41,9 +46,34 @@ export default function PerfilPage() {
       setProfile({ name: data.name, avatar_url: data.avatar_url });
       setPreviewUrl(data.avatar_url ?? "");
     }
-
     setLoading(false);
   }
+
+  // Funciones para editar nombre
+  const handleStartEditName = () => {
+    if (profile) {
+      setEditedName(profile.name);
+      setIsEditingName(true);
+    }
+  };
+  const handleCancelEditName = () => {
+    setIsEditingName(false);
+    setEditedName("");
+  };
+  const handleSaveName = async () => {
+    if (!user) return;
+    const { error } = await supabase
+      .from("profiles")
+      .update({ name: editedName })
+      .eq("id", user.id);
+    if (error) {
+      console.error("Error actualizando nombre:", error.message);
+      alert("No se pudo guardar el nombre: " + error.message);
+    } else {
+      await loadProfile(user);
+      setIsEditingName(false);
+    }
+  };
 
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0] ?? null;
@@ -81,19 +111,15 @@ export default function PerfilPage() {
     const { data: urlData } = supabase.storage.from("avatars").getPublicUrl(path);
     const publicUrl = urlData.publicUrl;
 
-    // 3) Actualizar tabla profiles y devolver la fila
-    const { data: updated, error: dbError } = await supabase
+    // 3) Actualizar tabla profiles
+    const { error: dbError } = await supabase
       .from("profiles")
       .update({ avatar_url: publicUrl })
-      .eq("id", user.id)
-      .select()
-      .single();
-
+      .eq("id", user.id);
     if (dbError) {
       console.error("❌ Error actualizando perfil en la BBDD:", dbError.message);
       alert("No se pudo guardar la foto en el perfil: " + dbError.message);
     } else {
-      console.log("✅ Perfil actualizado:", updated);
       await loadProfile(user);
       setSelectedFile(null);
     }
@@ -120,7 +146,45 @@ export default function PerfilPage() {
 
           <h1 className="text-2xl font-bold text-gray-800 mb-4">Mi Perfil</h1>
           <hr className="border-t border-gray-100 mb-6" />
-          <h2 className="text-xl font-semibold text-gray-700 mb-4">{profile?.name}</h2>
+
+          {/* Nombre editable */}
+          <div className="flex items-center justify-center mb-4">
+            {isEditingName ? (
+              <input
+                type="text"
+                value={editedName}
+                onChange={e => setEditedName(e.target.value)}
+                onKeyDown={e => { if (e.key === "Enter") handleSaveName(); }}
+                className="border rounded px-2 py-1 focus:ring-2 focus:ring-blue-500"
+              />
+            ) : (
+              <h2 className="text-xl font-semibold text-gray-700 mb-4">
+                {profile?.name}
+              </h2>
+            )}
+            <button
+              onClick={isEditingName ? handleSaveName : handleStartEditName}
+              className="ml-2 relative -top-1.5 text-blue-500 hover:text-blue-700 focus:outline-none"
+            >
+              <Edit size={20} />
+            </button>
+            {isEditingName && (
+              <>
+                <button
+                  onClick={handleSaveName}
+                  className="ml-2 text-blue-500 hover:text-blue-700 focus:outline-none"
+                >
+                  Aceptar
+                </button>
+                <button
+                  onClick={handleCancelEditName}
+                  className="ml-2 text-red-500 hover:text-red-700 focus:outline-none"
+                >
+                  Cancelar
+                </button>
+              </>
+            )}
+          </div>
 
           <div className="mx-auto mb-6 w-32 h-32 relative rounded-full overflow-hidden border-2 border-gray-200">
             <Image
