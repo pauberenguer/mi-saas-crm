@@ -210,6 +210,7 @@ export default function Conversation({
       .order("id", { ascending: true });
     if (error || !data) return;
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const out: any[] = [];
     let skipNext = false;
     for (const row of data) {
