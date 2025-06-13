@@ -29,6 +29,7 @@ interface Note {
 interface Profile {
   id: string;
   name: string;
+  avatar_url?: string;
 }
 
 interface ConversationUpdate {
@@ -103,13 +104,14 @@ export default function ChatPage() {
     if (!currentUser) return;
 
     const { data } = await supabase.from("contactos").select("assigned_to, estado");
-    const newCounts = { total: 0, noAsignado: 0, tu: 0, equipo: 0 };
+    const newCounts: Record<FilterType, number> = { "Todos": 0, "No Asignado": 0, "Tú": 0, "Equipo": 0 };
     
     if (data) {
-      newCounts.total = data.filter(c => c.estado !== "Cerrado").length;
-      newCounts.noAsignado = data.filter(c => !c.assigned_to && c.estado !== "Cerrado").length;
-      newCounts.tu = data.filter(c => c.assigned_to === currentUser.id && c.estado !== "Cerrado").length;
-      newCounts.equipo = data.filter(c => c.assigned_to && c.assigned_to !== currentUser.id && c.estado !== "Cerrado").length;
+      newCounts["Todos"] = data.filter(c => c.estado !== "Cerrado").length;
+      newCounts["No Asignado"] = data.filter(c => !c.assigned_to && c.estado !== "Cerrado").length;
+      newCounts["Tú"] = data.filter(c => c.assigned_to === currentUser.id && c.estado !== "Cerrado").length;
+      // Equipo incluye TODOS los contactos asignados (incluyendo los tuyos)
+      newCounts["Equipo"] = data.filter(c => c.assigned_to && c.estado !== "Cerrado").length;
     }
     
     setCounts(newCounts);
@@ -119,7 +121,14 @@ export default function ChatPage() {
   useEffect(() => {
     async function fetchUser() {
       const { data } = await supabase.auth.getUser();
-      setCurrentUser(data.user);
+      if (data.user) {
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("id, name, avatar_url")
+          .eq("id", data.user.id)
+          .single();
+        if (profile) setCurrentUser(profile);
+      }
     }
     fetchUser();
   }, []);
@@ -127,6 +136,27 @@ export default function ChatPage() {
   // Una vez que sabemos quién es el usuario, traemos los conteos
   useEffect(() => {
     fetchCounts(currentUser);
+  }, [currentUser, fetchCounts]);
+
+  // Listener en tiempo real para actualizar conteos cuando cambian asignaciones
+  useEffect(() => {
+    if (!currentUser) return;
+    
+    const chan = supabase
+      .channel("contactos_counts_updates")
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "contactos" },
+        () => {
+          // Cuando se actualiza cualquier contacto, refrescamos los conteos
+          fetchCounts(currentUser);
+        }
+      )
+      .subscribe();
+    
+    return () => {
+      void supabase.removeChannel(chan);
+    };
   }, [currentUser, fetchCounts]);
 
   // Load profiles
@@ -220,12 +250,16 @@ export default function ChatPage() {
         ({ new: newData }) => {
           const contactData = newData as ConversationUpdate;
           setSelectedContact((prev) =>
-            prev ? { ...prev, ...contactData, assigned_to: contactData.assigned_to, estado: contactData.estado }
-            : null
+            prev ? { 
+              ...prev, 
+              assigned_to: contactData.assigned_to, 
+              estado: contactData.estado as "Abierto" | "Cerrado",
+              etiquetas: contactData.etiquetas as Record<string, string> | undefined
+            } : null
           );
-          setContactEtiquetas(contactData.etiquetas || {});
-          setIsPaused(contactData.is_paused);
-          setContactPauseUntil(contactData.pause_until);
+          setContactEtiquetas(contactData.etiquetas as Record<string, string> || {});
+          setIsPaused(contactData.is_paused ?? false);
+          setContactPauseUntil((contactData as ConversationUpdate & { pause_until?: string }).pause_until || null);
         }
       )
       .on(
@@ -233,15 +267,22 @@ export default function ChatPage() {
         { event: "INSERT", schema: "public", table: "conversaciones" },
         async ({ new: row }) => {
           const messageData = row as ConversationMessage;
-          const ts = messageData.created_at;
-          setNotes((prev) => [
-            ...prev,
-            { id: row.id, message: messageData.message, created_at: ts },
-          ]);
+          const message = messageData.message as { content: string; additional_kwargs: { origin?: string } };
+          
+          // Solo agregar si es una nota (origin: "note")
+          if (message.additional_kwargs?.origin === "note") {
+            const ts = messageData.created_at;
+            setNotes((prev) => [
+              ...prev,
+              { id: row.id, message, created_at: ts },
+            ]);
+          }
         }
       )
       .subscribe();
-    return () => supabase.removeChannel(chan);
+    return () => {
+      void supabase.removeChannel(chan);
+    };
   }, [selectedContact]);
 
   // Real-time updates for notes
@@ -261,13 +302,22 @@ export default function ChatPage() {
           const messageRow = newMessage as { message: Record<string, unknown> };
           const msg = messageRow.message;
           if (msg?.type === "ai" && msg?.content) {
-            void fetchMessages(selectedContact.session_id);
+            // Recargar notas cuando hay un mensaje de AI
+            void supabase
+              .from("conversaciones")
+              .select("*")
+              .eq("session_id", selectedContact.session_id)
+              .eq("message->additional_kwargs->>origin", "note")
+              .order("id", { ascending: true })
+              .then((res) => res.data && setNotes(res.data as Note[]));
           }
         }
       )
       .subscribe();
-    return () => supabase.removeChannel(chan);
-  }, [selectedContact, fetchMessages]);
+    return () => {
+      void supabase.removeChannel(chan);
+    };
+  }, [selectedContact]);
 
   // Countdown timer
   useEffect(() => {
@@ -298,7 +348,7 @@ export default function ChatPage() {
   // Pause / resume
   const pauseAutomation = async (duration: number | null) => {
     if (!selectedContact) return;
-    const payload: any = { is_paused: true, pause_until: null };
+    const payload: { is_paused: boolean; pause_until: string | null } = { is_paused: true, pause_until: null };
     if (duration) payload.pause_until = new Date(Date.now() + duration).toISOString();
     await supabase.from("contactos").update(payload).eq("session_id", selectedContact.session_id);
     setIsPaused(true);
@@ -323,7 +373,7 @@ export default function ChatPage() {
     await supabase.from("contactos").update({ assigned_to: userId }).in("session_id", selectedIds);
     setSelectedIds([]);
     setShowAssignMenu(false);
-    await fetchCounts(profile);
+    // Los conteos se actualizarán automáticamente en tiempo real
     setShowAssignedToast(true);
     setTimeout(() => setShowAssignedToast(false), 5000);
   };
@@ -333,7 +383,7 @@ export default function ChatPage() {
     setSelectedIds([]);
     setActiveFilter("No Asignado");
     setShowAssignMenu(false);
-    await fetchCounts(currentUser);
+    // Los conteos se actualizarán automáticamente en tiempo real
   };
   const markAsClosed = async () => {
     if (!selectedIds.length) return;
@@ -343,7 +393,7 @@ export default function ChatPage() {
       .in("session_id", selectedIds);
     setSelectedIds([]);
     setShowDeletedToast(true);
-    await fetchCounts(currentUser);
+    // Los conteos se actualizarán automáticamente en tiempo real
     setTimeout(() => setShowDeletedToast(false), 5000);
   };
   const reOpenConversations = async () => {
@@ -355,7 +405,7 @@ export default function ChatPage() {
     setSelectedIds([]);
     setActiveFilter("No Asignado");
     setShowAssignMenu(false);
-    await fetchCounts(currentUser);
+    // Los conteos se actualizarán automáticamente en tiempo real
     setShowReopenedToast(true);
     setTimeout(() => setShowReopenedToast(false), 5000);
   };
@@ -370,7 +420,7 @@ export default function ChatPage() {
       .update({ assigned_to: userId })
       .eq("session_id", selectedContact.session_id);
     setShowAssignMenu(false);
-    await fetchCounts(profile);
+    // Los conteos se actualizarán automáticamente en tiempo real
     setShowAssignedToast(true);
     setTimeout(() => setShowAssignedToast(false), 5000);
   };
@@ -381,7 +431,7 @@ export default function ChatPage() {
       .update({ assigned_to: null })
       .eq("session_id", selectedContact.session_id);
     setShowAssignMenu(false);
-    await fetchCounts(currentUser);
+    // Los conteos se actualizarán automáticamente en tiempo real
     setShowAssignedToast(true);
     setTimeout(() => setShowAssignedToast(false), 5000);
   };
@@ -448,27 +498,11 @@ export default function ChatPage() {
 
   return (
     <>
-      <style jsx>{`
-        @keyframes fadeIn {
-          from {
-            opacity: 0;
-            transform: translateY(10px);
-          }
-          to {
-            opacity: 1;
-            transform: translateY(0);
-          }
-        }
-        .animate-fadeIn {
-          animation: fadeIn 0.5s ease-in-out forwards;
-        }
-      `}</style>
-
-      <div className="relative flex flex-col h-full bg-gray-50 p-8 animate-fadeIn">
+      <div className="relative flex flex-col h-full bg-gray-50 p-8">
         <audio ref={audioRef} src="/notification.mp3" preload="auto" />
 
         {/* Header */}
-        <div className="animate-fadeIn mb-2 grid grid-cols-3 items-center">
+        <div className="mb-2 grid grid-cols-3 items-center">
           <h1 className="text-3xl font-bold" style={{ color: "#1d1d1d" }}>
             Chat
           </h1>
@@ -485,7 +519,7 @@ export default function ChatPage() {
           <div />
         </div>
         <hr
-          className="border-t mb-8 animate-fadeIn"
+          className="border-t mb-8"
           style={{ borderColor: "#4d4d4d" }}
         />
 
@@ -500,7 +534,7 @@ export default function ChatPage() {
                   Tú: User,
                   Equipo: Users,
                   Todos: List,
-                }[label];
+                }[label] || XCircle;
                 return (
                   <button
                     key={label}
@@ -819,8 +853,6 @@ export default function ChatPage() {
                       contactId={selectedContact.session_id}
                       messageMode={messageMode}
                       setMessageMode={setMessageMode}
-                      filter={activeFilter}
-                      selectedCount={selectedIds.length}
                     />
                   </div>
                 </div>
@@ -1034,7 +1066,7 @@ export default function ChatPage() {
                     setShowDeletedToast(true);
                     setSelectedIds([]);
                     setShowAssignMenu(false);
-                    await fetchCounts(currentUser);
+                    // Los conteos se actualizarán automáticamente en tiempo real
                     setTimeout(() => setShowDeletedToast(false), 5000);
                   }}
                   className="px-4 py-2 bg-red-500 text-white rounded"

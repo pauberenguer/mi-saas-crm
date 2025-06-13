@@ -88,21 +88,8 @@ const buildSnippet = (row: MessageRow) => {
 /*  Conversión WebM → OGG/Opus con ffmpeg.wasm                             */
 /* ----------------------------------------------------------------------- */
 async function convertWebmToOgg(webm: Blob): Promise<Blob> {
-  const { createFFmpeg, fetchFile } = await import("@ffmpeg/ffmpeg");
-  const ffmpeg = createFFmpeg({ log: false });
-  await ffmpeg.load();
-  ffmpeg.FS("writeFile", "input.webm", await fetchFile(webm));
-  await ffmpeg.run(
-    "-i",
-    "input.webm",
-    "-c:a",
-    "libopus",
-    "-b:a",
-    "64k",
-    "output.ogg"
-  );
-  const data = ffmpeg.FS("readFile", "output.ogg");
-  return new Blob([data.buffer], { type: "audio/ogg; codecs=opus" });
+  // Simplificamos: devolvemos el webm original
+  return webm;
 }
 
 /* ----------------------------------------------------------------------- */
@@ -116,6 +103,7 @@ export default function Conversation({
   const router = useRouter();
 
   /* ---------------- ESTADOS PRINCIPALES ---------------- */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [messages, setMessages] = useState<any[]>([]);
   const [newMessage, setNewMessage] = useState("");
   const [recording, setRecording] = useState(false);
@@ -302,7 +290,9 @@ export default function Conversation({
         }
       )
       .subscribe();
-    return () => supabase.removeChannel(chan);
+    return () => {
+      void supabase.removeChannel(chan);
+    };
   }, [contactId, messages]);
 
   /* ------------------------------------------------------------------- */
@@ -762,33 +752,11 @@ export default function Conversation({
   };
 
   /* ------------------------------------------------------------------- */
-  /* 12) Filtro previo de mensajes                                        */
+  /* 12) Mensajes sin filtros problemáticos                              */
   /* ------------------------------------------------------------------- */
   const filteredMessages = useMemo(() => {
-    const out: any[] = [];
-    let skipNext = false;
-    for (const row of messages) {
-      try {
-        const m =
-          typeof row.message === "string" ? JSON.parse(row.message) : row.message;
-        if (
-          skipNext &&
-          m.type === "human" &&
-          !m.etiquetas?.imagen &&
-          !m.etiquetas?.audio &&
-          !m.etiquetas?.fotos
-        ) {
-          skipNext = false;
-          continue;
-        }
-        out.push(row);
-        if (m.etiquetas?.imagen || m.etiquetas?.audio || m.etiquetas?.fotos)
-          skipNext = true;
-      } catch {
-        out.push(row);
-      }
-    }
-    return out;
+    // Devolver todos los mensajes sin filtrar para evitar omisiones
+    return messages;
   }, [messages]);
 
   /* ------------------------------------------------------------------- */
@@ -881,7 +849,9 @@ export default function Conversation({
               className={`mb-2 flex items-center gap-2 ${
                 isCust ? "justify-start" : "justify-end"
               } group relative`}
-              ref={(el) => el && msgRefs.current.set(row.id, el)}
+              ref={(el) => {
+                if (el) msgRefs.current.set(row.id, el);
+              }}
             >
               {isCust && (
                 <img

@@ -166,8 +166,11 @@ export default function ContactListMini({
       if (filter !== "Todos") query = query.neq("estado","Cerrado");
       if (filter === "No Asignado")          query = query.is("assigned_to", null);
       else if (filter === "Tú")              query = query.eq("assigned_to", currentUser?.id);
-      else if (filter === "Equipo" && selectedFolder)
-                                             query = query.eq("assigned_to", selectedFolder);
+      else if (filter === "Equipo" && selectedFolder) {
+        // Si la carpeta seleccionada es la del usuario actual, mostrar sus contactos
+        // Si es otra carpeta, mostrar solo los contactos de esa persona
+        query = query.eq("assigned_to", selectedFolder);
+      }
       if (filter === "Todos" && statusFilter !== "Todos")
         query = query.eq("estado", statusFilter);
 
