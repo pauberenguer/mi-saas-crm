@@ -14,6 +14,19 @@ import {
 } from "lucide-react";
 import { supabase } from "../utils/supabaseClient";
 
+// Tipos para los objetos de Supabase
+interface ConversationInsert {
+  session_id: string;
+  created_at: string;
+  [key: string]: unknown;
+}
+
+interface ContactUpdate {
+  session_id: string;
+  last_viewed_at: string;
+  [key: string]: unknown;
+}
+
 const navItems = [
   { name: "Inicio",         href: "/inicio",          Icon: Home },
   { name: "Contactos",      href: "/contactos",       Icon: Users },
@@ -99,8 +112,9 @@ export default function Sidebar() {
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "conversaciones" },
         ({ new: row }) => {
-          const sid = (row as any).session_id as string;
-          const ts  = (row as any).created_at as string;
+          const typedRow = row as ConversationInsert;
+          const sid = typedRow.session_id;
+          const ts = typedRow.created_at;
           setLastMessageAt(lm => ({ ...lm, [sid]: ts }));
         }
       )
@@ -116,8 +130,9 @@ export default function Sidebar() {
         "postgres_changes",
         { event: "UPDATE", schema: "public", table: "contactos" },
         ({ new: row }) => {
-          const sid = (row as any).session_id as string;
-          const lv  = (row as any).last_viewed_at as string;
+          const typedRow = row as ContactUpdate;
+          const sid = typedRow.session_id;
+          const lv = typedRow.last_viewed_at;
           setLastViewedAt(prev => ({ ...prev, [sid]: lv }));
         }
       )

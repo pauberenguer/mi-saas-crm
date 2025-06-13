@@ -1,12 +1,13 @@
 // File: src/app/inicio/page.tsx
 "use client";
 import React from "react";
+import Link from "next/link";
 
 export default function HomeDashboard() {
   return (
     <>
       {/* Definición de la animación fadeIn */}
-      <style jsx>{`
+      <style>{`
         @keyframes fadeIn {
           from {
             opacity: 0;
@@ -54,12 +55,12 @@ export default function HomeDashboard() {
               <p className="text-gray-600 mb-6 text-center">
                 Gestiona y visualiza la información de tus clientes.
               </p>
-              <a
+              <Link
                 href="/contactos"
                 className="inline-block bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded text-center"
               >
                 Ver Contactos
-              </a>
+              </Link>
             </div>
 
             {/* 2. Chat */}
@@ -70,12 +71,12 @@ export default function HomeDashboard() {
               <p className="text-gray-600 mb-6 text-center">
                 Accede a las conversaciones en tiempo real con tus clientes.
               </p>
-              <a
+              <Link
                 href="/chat"
                 className="inline-block bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded text-center"
               >
                 Ir a Chat
-              </a>
+              </Link>
             </div>
 
             {/* 3. Automatizaciones */}
@@ -86,12 +87,12 @@ export default function HomeDashboard() {
               <p className="text-gray-600 mb-6 text-center">
                 Administra las secuencias y flujos automatizados del sistema.
               </p>
-              <a
+              <Link
                 href="/automatizaciones"
                 className="inline-block bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded text-center"
               >
                 Ver Automatización
-              </a>
+              </Link>
             </div>
 
             {/* 4. Configuración */}
@@ -102,12 +103,12 @@ export default function HomeDashboard() {
               <p className="text-gray-600 mb-6 text-center">
                 Ajusta las preferencias y parámetros de tu cuenta.
               </p>
-              <a
+              <Link
                 href="/configuracion"
                 className="inline-block bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded text-center"
               >
                 Ir a Configuración
-              </a>
+              </Link>
             </div>
           </div>
         </div>

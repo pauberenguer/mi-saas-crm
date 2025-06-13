@@ -1,9 +1,23 @@
 "use client";
-import { useState, useEffect } from "react";
-import { supabase } from "@/utils/supabaseClient";
+import React, { useState, useEffect } from "react";
+import { supabase } from "../utils/supabaseClient";
 
 interface ChatProps {
   contactId: string;
+}
+
+interface MessageContent {
+  type: string;
+  content: string;
+  additional_kwargs?: Record<string, unknown>;
+  response_metadata?: Record<string, unknown>;
+}
+
+interface MessageData {
+  id: number;
+  session_id: string;
+  message: MessageContent;
+  created_at: string;
 }
 
 const getMessageStyle = (type: string) => {
@@ -14,7 +28,7 @@ const getMessageStyle = (type: string) => {
 };
 
 export default function Chat({ contactId }: ChatProps) {
-  const [messages, setMessages] = useState<any[]>([]);
+  const [messages, setMessages] = useState<MessageData[]>([]);
   const [newMessage, setNewMessage] = useState("");
 
   const fetchMessages = async () => {
@@ -34,7 +48,7 @@ export default function Chat({ contactId }: ChatProps) {
     if (contactId) {
       fetchMessages();
     }
-  }, [contactId]);
+  }, [contactId, fetchMessages]);
 
   const sendMessage = async () => {
     if (newMessage.trim().length === 0) return;

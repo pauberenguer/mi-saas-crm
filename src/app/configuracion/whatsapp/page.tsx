@@ -8,7 +8,8 @@ import React, {
 } from "react";
 import Link from "next/link";
 import { createClient } from "@supabase/supabase-js";
-import { MoreVertical } from "lucide-react";
+// Icons importados pero no utilizados en esta página específica
+// Se pueden importar según se necesiten
 import { createPortal } from "react-dom";
 
 // Inicializa Supabase

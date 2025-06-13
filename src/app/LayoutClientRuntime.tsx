@@ -18,6 +18,12 @@ interface NotificationContextType {
   toggle: () => void;
 }
 
+// Tipo para el row de Supabase
+interface ConversationRow {
+  message: string | Record<string, unknown>;
+  [key: string]: unknown;
+}
+
 // Creamos el contexto con valores por defecto
 const NotificationContext = createContext<NotificationContextType>({
   enabled: true,
@@ -80,7 +86,8 @@ export default function LayoutClientRuntime({
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "conversaciones" },
         ({ new: row }) => {
-          const mRaw = (row as any).message;
+          const typedRow = row as ConversationRow;
+          const mRaw = typedRow.message;
           const m = typeof mRaw === "string" ? JSON.parse(mRaw) : mRaw;
           const origin = m.additional_kwargs?.origin;
 

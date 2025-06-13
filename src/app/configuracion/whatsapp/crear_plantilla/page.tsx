@@ -52,17 +52,149 @@ export default function CrearPlantillaPage() {
 
   // form state
   const [templateName, setTemplateName] = useState("");
-  const [category,     setCategory]     = useState("");
-  const [idiomas,      setIdiomas]      = useState<string[]>([]);
-  const [menuOpen,     setMenuOpen]     = useState(false);
-  const [search,       setSearch]       = useState("");
-  const [headerType,   setHeaderType]   = useState<HeaderType|null>(null);
-  const [headerText,   setHeaderText]   = useState("");
-  const [messageText,  setMessageText]  = useState("");
-  const [footerText,   setFooterText]   = useState("");
-  const [headerFile,   setHeaderFile]   = useState<File|null>(null);
-  const [previewSrc,   setPreviewSrc]   = useState<string>("");
-  const [fileError,    setFileError]    = useState("");
+  const [templateCategory, setTemplateCategory] = useState("MARKETING");
+  const [templateLanguage, setTemplateLanguage] = useState("es");
+  const [headerType, setHeaderType] = useState<"NONE" | "TEXT" | "IMAGE" | "VIDEO" | "DOCUMENT">("NONE");
+  const [headerText, setHeaderText] = useState("");
+  const [headerMedia, setHeaderMedia] = useState<File | null>(null);
+  const [bodyText, setBodyText] = useState("");
+  const [footerText, setFooterText] = useState("");
+  const [buttonType, setButtonType] = useState<"NONE" | "CALL_TO_ACTION" | "QUICK_REPLY">("NONE");
+  const [btnText, setBtnText] = useState("");
+  const [btnUrl, setBtnUrl] = useState("");
+  const [btnVar, setBtnVar] = useState("");
+  const [replyButtons, setReplyButtons] = useState<Array<{text: string}>>([]);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitMessage, setSubmitMessage] = useState("");
+  const [mediaPreview, setMediaPreview] = useState<string | null>(null);
+  const [dragOver, setDragOver] = useState(false);
+  const [variables, setVariables] = useState<Array<{name: string, example: string}>>([]);
+  const [showVariableDialog, setShowVariableDialog] = useState(false);
+  const [newVarName, setNewVarName] = useState("");
+  const [newVarExample, setNewVarExample] = useState("");
+
+  const bodyTextareaRef = useRef<HTMLTextAreaElement>(null);
+
+  interface MediaUploadResponse {
+    id: string;
+    url: string;
+    [key: string]: unknown;
+  }
+
+  // Función para subir media
+  const uploadMedia = async (file: File): Promise<MediaUploadResponse> => {
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("type", file.type.startsWith("image/") ? "image" : file.type.startsWith("video/") ? "video" : "document");
+    formData.append("messaging_product", "whatsapp");
+
+    const response = await fetch("/api/whatsapp/upload-media", {
+      method: "POST",
+      body: formData,
+    });
+
+    if (!response.ok) {
+      throw new Error("Error al subir el archivo");
+    }
+
+    return response.json() as Promise<MediaUploadResponse>;
+  };
+
+  // Función para enviar plantilla
+  const submitTemplate = async () => {
+    if (!templateName.trim() || !bodyText.trim()) {
+      setSubmitMessage("Por favor, completa todos los campos requeridos.");
+      return;
+    }
+
+    setIsSubmitting(true);
+    setSubmitMessage("");
+
+    try {
+      const components = [];
+
+      // Header component
+      if (headerType !== "NONE") {
+        const headerComponent: Record<string, unknown> = {
+          type: "HEADER",
+          format: headerType,
+        };
+
+        if (headerType === "TEXT") {
+          headerComponent.text = headerText;
+        } else if (headerMedia && (headerType === "IMAGE" || headerType === "VIDEO" || headerType === "DOCUMENT")) {
+          const mediaData = await uploadMedia(headerMedia);
+          headerComponent.example = {
+            header_handle: [mediaData.id],
+          };
+        }
+
+        components.push(headerComponent);
+      }
+
+      // Body component
+      const bodyComponent: Record<string, unknown> = {
+        type: "BODY",
+        text: bodyText,
+      };
+
+      if (variables.length > 0) {
+        bodyComponent.example = {
+          body_text: [variables.map(v => v.example)],
+        };
+      }
+
+      components.push(bodyComponent);
+
+      // Footer component
+      if (footerText.trim()) {
+        components.push({
+          type: "FOOTER",
+          text: footerText,
+        });
+      }
+
+      const templateData = {
+        name: templateName.toLowerCase().replace(/\s+/g, "_"),
+        category: templateCategory,
+        language: templateLanguage,
+        components: components,
+      };
+
+      const response = await fetch("/api/whatsapp/create-template", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(templateData),
+      });
+
+      if (!response.ok) {
+        throw new Error("Error al crear la plantilla");
+      }
+
+      setSubmitMessage("¡Plantilla creada exitosamente!");
+      
+      // Reset form
+      setTemplateName("");
+      setTemplateCategory("MARKETING");
+      setTemplateLanguage("es");
+      setHeaderType("NONE");
+      setHeaderText("");
+      setHeaderMedia(null);
+      setBodyText("");
+      setFooterText("");
+      setButtonType("NONE");
+      setVariables([]);
+      setMediaPreview(null);
+      
+    } catch (error) {
+      console.error("Error:", error);
+      setSubmitMessage("Error al crear la plantilla. Por favor, inténtalo de nuevo.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   // pickers
   const [emojiOpenMsg, setEmojiOpenMsg] = useState(false);
@@ -70,12 +202,7 @@ export default function CrearPlantillaPage() {
   const [emojiOpenHdr, setEmojiOpenHdr] = useState(false);
   const [varOpenHdr,   setVarOpenHdr]   = useState(false);
 
-  // buttons
-  const [buttonType,   setButtonType]   = useState<ButtonType>("");
-  const [btnText,      setBtnText]      = useState("");
-  const [btnUrl,       setBtnUrl]       = useState("");
-  const [btnVar,       setBtnVar]       = useState("");
-  const [replyButtons, setReplyButtons] = useState<string[]>([]);
+  // buttons (estas variables ya están declaradas antes, eliminando duplicados)
 
   // modals
   const [showConfirm,     setShowConfirm]     = useState(false);
@@ -134,31 +261,31 @@ export default function CrearPlantillaPage() {
     }
     if (!valid) {
       setFileError("Formato inválido");
-      setHeaderFile(null);
-      setPreviewSrc("");
+      setHeaderMedia(null);
+      setMediaPreview(null);
       return;
     }
     if (file.size > maxSize) {
       setFileError(`Supera ${maxSize/1e6}MB`);
-      setHeaderFile(null);
-      setPreviewSrc("");
+      setHeaderMedia(null);
+      setMediaPreview(null);
       return;
     }
     setFileError("");
-    setHeaderFile(file);
-    setPreviewSrc(URL.createObjectURL(file));
+    setHeaderMedia(file);
+    setMediaPreview(URL.createObjectURL(file));
   };
 
   /* ------------
      Insertions
   -------------*/
-  const insertEmojiMsg = (d: any) => { setMessageText(p => p + d.emoji); setEmojiOpenMsg(false); };
+  const insertEmojiMsg = (d: any) => { setBodyText(p => p + d.emoji); setEmojiOpenMsg(false); };
   const insertEmojiHdr = (d: any) => { setHeaderText(p => p + d.emoji); setEmojiOpenHdr(false); };
-  const insertVarMsg   = (v: string) => { setMessageText(p => p + `{{${v}}}`); setVarOpenMsg(false); };
+  const insertVarMsg   = (v: string) => { setBodyText(p => p + `{{${v}}}`); setVarOpenMsg(false); };
   const insertVarHdr   = (v: string) => { setHeaderText(p => p + `{{${v}}}`); setVarOpenHdr(false); };
 
   // character counters
-  const remMsg = 1024 - messageText.length;
+  const remMsg = 1024 - bodyText.length;
   const remHdr =   40 - headerText.length;
   const remFtr =   60 - footerText.length;
   const selLang = idiomas.at(-1) || "";
@@ -174,9 +301,9 @@ export default function CrearPlantillaPage() {
   // botón habilitado solo si se cumplen los 4 requisitos
   const canSend =
     templateName.trim() !== "" &&
-    category !== "" &&
+    templateCategory !== "" &&
     idiomas.length > 0 &&
-    messageText.trim() !== "";
+    bodyText.trim() !== "";
 
   /* ======================================
         Manejador para envío al webhook
@@ -198,7 +325,7 @@ export default function CrearPlantillaPage() {
     const format   = headerType ?? "NONE";
 
     // formateo de body_text: reemplaza saltos de línea por "\n" solo si existen
-    let bodyTextFormatted = sanitizeVars(messageText);
+    let bodyTextFormatted = sanitizeVars(bodyText);
     if (bodyTextFormatted.includes("\n")) {
       bodyTextFormatted = bodyTextFormatted.replace(/\n/g, "\\n");
     }
@@ -206,7 +333,7 @@ export default function CrearPlantillaPage() {
     const payload: Record<string, any> = {
       name: templateName,
       language,
-      category,
+      category: templateCategory,
       format,
       body_text: bodyTextFormatted,
     };
@@ -259,10 +386,10 @@ export default function CrearPlantillaPage() {
                 Categoría de Plantilla
               </label>
               <select
-                value={category}
-                onChange={e => setCategory(e.target.value)}
+                value={templateCategory}
+                onChange={e => setTemplateCategory(e.target.value)}
                 className={`w-full px-3 py-1 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 ${
-                  category ? "text-gray-900" : "text-gray-400"
+                  templateCategory ? "text-gray-900" : "text-gray-400"
                 }`}
               >
                 <option value="" disabled>Seleccionar Categoría…</option>
@@ -365,7 +492,7 @@ export default function CrearPlantillaPage() {
                     {Object.values(HeaderType).map(t => (
                       <button
                         key={t}
-                        onClick={() => { setHeaderType(t); setHeaderText(""); setHeaderFile(null); setPreviewSrc(""); setFileError(""); }}
+                        onClick={() => { setHeaderType(t); setHeaderText(""); setHeaderMedia(null); setMediaPreview(null); setFileError(""); }}
                         className={`flex-1 border border-dashed border-gray-300 rounded-md px-4 py-2 text-sm text-gray-700 hover:border-gray-400 ${headerType===t?"bg-gray-100":""}`}
                       >
                         {t === HeaderType.TEXT ? "Texto"
@@ -408,13 +535,13 @@ export default function CrearPlantillaPage() {
                   {(headerType===HeaderType.IMAGE||headerType===HeaderType.VIDEO||headerType===HeaderType.DOCUMENT) && (
                     <div className="flex items-center space-x-2">
                       <label className="flex-1 px-3 py-2 border border-gray-300 rounded-md cursor-pointer hover:border-gray-400">
-                        {headerFile?.name ?? (headerType===HeaderType.IMAGE?"Seleccionar Imagen":headerType===HeaderType.VIDEO?"Seleccionar Video":"Seleccionar Documento")}
+                        {headerMedia?.name ?? (headerType===HeaderType.IMAGE?"Seleccionar Imagen":headerType===HeaderType.VIDEO?"Seleccionar Video":"Seleccionar Documento")}
                         <input type="file" accept={
                           headerType===HeaderType.IMAGE?".jpg,.jpeg,.png":
                           headerType===HeaderType.VIDEO?".mp4,.3gp":".pdf"
                         } onChange={onFileChange} className="hidden"/>
                       </label>
-                      {headerFile && <Trash2 className="w-5 h-5 text-gray-500 cursor-pointer" onClick={()=>{setHeaderFile(null);setPreviewSrc("")}}/>}
+                      {headerMedia && <Trash2 className="w-5 h-5 text-gray-500 cursor-pointer" onClick={()=>{setHeaderMedia(null);setMediaPreview(null)}}/>}
                       <span className="text-xs text-gray-500">40</span>
                     </div>
                   )}
@@ -427,8 +554,8 @@ export default function CrearPlantillaPage() {
                   <textarea
                     rows={4}
                     placeholder="Mensaje de texto"
-                    value={messageText}
-                    onChange={e=>setMessageText(e.target.value)}
+                    value={bodyText}
+                    onChange={e=>setBodyText(e.target.value)}
                     className="mt-1 w-full border border-gray-300 rounded-md p-2 shadow-sm focus:ring-blue-500 focus:border-blue-500"
                   />
                   <div className="flex justify-end items-center space-x-2 mt-1 relative">
@@ -492,19 +619,19 @@ export default function CrearPlantillaPage() {
               {idiomas.length > 0 && (
                 <div className="absolute top-[140px] left-4 z-10 space-y-2">
                   <div className="bg-white p-2 rounded-lg shadow">
-                    {headerType===HeaderType.IMAGE && previewSrc && <img src={previewSrc} className="rounded-md mb-2 w-full" />}
-                    {headerType===HeaderType.VIDEO && previewSrc && <video src={previewSrc} controls className="rounded-md mb-2 w-full" />}
-                    {headerType===HeaderType.DOCUMENT && headerFile && (
+                    {headerType===HeaderType.IMAGE && mediaPreview && <img src={mediaPreview} className="rounded-md mb-2 w-full" />}
+                    {headerType===HeaderType.VIDEO && mediaPreview && <video src={mediaPreview} controls className="rounded-md mb-2 w-full" />}
+                    {headerType===HeaderType.DOCUMENT && headerMedia && (
                       <div className="flex items-center space-x-2 mb-2">
                         <FileText className="w-6 h-6 text-gray-500" />
-                        <span className="text-sm truncate">{headerFile.name}</span>
+                        <span className="text-sm truncate">{headerMedia.name}</span>
                       </div>
                     )}
                     {headerText && <p className="font-semibold text-gray-900 text-sm mb-1">{renderLine(headerText)}</p>}
-                    {messageText.split("\n").map((ln,i)=><p key={i} className="text-gray-800 text-sm mb-1">{renderLine(ln)}</p>)}
+                    {bodyText.split("\n").map((ln,i)=><p key={i} className="text-gray-800 text-sm mb-1">{renderLine(ln)}</p>)}
                     {footerText && <p className="text-gray-500 text-xs mb-1">{footerText}</p>}
                   </div>
-                  {buttonType==="REPLY" && replyButtons.map((t,i)=>(<button key={i} className="w-full bg-white border rounded-md py-2 text-blue-600">{t}</button>))}
+                  {buttonType==="REPLY" && replyButtons.map((t,i)=>(<button key={i} className="w-full bg-white border rounded-md py-2 text-blue-600">{t.text}</button>))}
                   {buttonType==="URL" && btnText && (<button className="w-full bg-white border rounded-md py-2 text-blue-600">{btnText}</button>)}
                 </div>
               )}

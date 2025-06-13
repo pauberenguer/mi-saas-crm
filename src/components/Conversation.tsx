@@ -19,7 +19,7 @@ import React, {
   ChangeEvent,
 } from "react";
 import { useRouter } from "next/navigation";
-import { supabase } from "@/utils/supabaseClient";
+import { supabase } from "../utils/supabaseClient";
 import imageCompression from "browser-image-compression";
 import {
   Image as ImageIcon,
@@ -39,8 +39,6 @@ interface ConversationProps {
   contactId: string;
   messageMode: "Responder" | "Nota";
   setMessageMode: (m: "Responder" | "Nota") => void;
-  filter: "No Asignado" | "Tú" | "Equipo" | "Todos";
-  selectedCount: number;
 }
 
 type TemplateItem = { name: string; category: string; language: string };
@@ -60,7 +58,12 @@ const getMessageStyle = (t: string) => {
 /*  ★ Añadido soporte a etiqueta video ★                                    */
 /* ----------------------------------------------------------------------- */
 const IMG_RE = /\.(jpe?g|png)$/i;
-const buildSnippet = (row: any) => {
+interface MessageRow {
+  message: string | Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+const buildSnippet = (row: MessageRow) => {
   if (!row) return "";
   const m =
     typeof row.message === "string" ? JSON.parse(row.message) : row.message;
@@ -104,8 +107,6 @@ export default function Conversation({
   contactId,
   messageMode,
   setMessageMode,
-  filter,
-  selectedCount,
 }: ConversationProps) {
   const router = useRouter();
 

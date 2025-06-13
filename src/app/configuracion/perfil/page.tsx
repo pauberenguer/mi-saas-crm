@@ -8,6 +8,7 @@ import { User, Loader2, Edit } from "lucide-react";
 import { supabase } from "../../../lib/supabaseClient";
 
 export default function PerfilPage() {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [user, setUser] = useState<any>(null);
   const [profile, setProfile] = useState<{ name: string; avatar_url: string | null } | null>(null);
   const [loading, setLoading] = useState(true);
