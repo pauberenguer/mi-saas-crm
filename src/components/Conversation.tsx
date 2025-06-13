@@ -59,9 +59,14 @@ const getMessageStyle = (t: string) => {
 /* ----------------------------------------------------------------------- */
 const IMG_RE = /\.(jpe?g|png)$/i;
 interface MessageRow {
+  id: number;
+  session_id: string;
+  created_at: string;
   message: string | Record<string, unknown>;
   [key: string]: unknown;
 }
+
+
 
 const buildSnippet = (row: MessageRow) => {
   if (!row) return "";
@@ -491,7 +496,9 @@ export default function Conversation({
 
       setRecording(false);
       setPaused(false);
-      intervalRef.current && clearInterval(intervalRef.current);
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+      }
     };
     mediaRecorderRef.current = mr;
     mr.start();
@@ -506,7 +513,9 @@ export default function Conversation({
     stopRecording();
     setRecording(false);
     setPaused(false);
-    intervalRef.current && clearInterval(intervalRef.current);
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+    }
     setElapsed(0);
   };
   const handleMicClick = () => !recording && startRecording();
@@ -519,7 +528,9 @@ export default function Conversation({
     } else {
       mediaRecorderRef.current.pause();
       setPaused(true);
-      intervalRef.current && clearInterval(intervalRef.current);
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+      }
     }
   };
 

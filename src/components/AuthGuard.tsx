@@ -1,11 +1,12 @@
 // File: src/components/AuthGuard.tsx
 "use client";
 
-import { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
-import { supabase } from "@/utils/supabaseClient";
+import { supabase } from "../utils/supabaseClient";
 import { Home, User, Zap, MessageSquare, Settings } from "lucide-react";
+import Image from "next/image";
 
 export default function AuthGuard({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -43,18 +44,22 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
         <div className="w-16 bg-[#eaecf0] p-4 flex flex-col space-y-6">
           <div className="flex justify-center">
             <Link href="/inicio">
-              <img
+              <Image
                 src="/logo-empresa-nuestra.png"
                 alt="Nuestra Empresa"
-                className="w-12 h-12 object-contain"
+                width={48}
+                height={48}
+                className="object-contain"
               />
             </Link>
           </div>
           <div className="flex justify-center">
-            <img
+            <Image
               src="/logo-empresa-cliente.png"
               alt="Empresa del Cliente"
-              className="w-12 h-12 object-contain"
+              width={48}
+              height={48}
+              className="object-contain"
             />
           </div>
           <nav>

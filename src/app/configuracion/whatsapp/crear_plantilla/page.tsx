@@ -4,9 +4,6 @@ import React, { useState, useRef, ChangeEvent } from "react";
 import { useRouter } from "next/navigation";
 import { FileText } from "lucide-react";
 
-// Tipos
-type ButtonType = "URL" | "REPLY" | "";
-
 const allLanguages = ["es", "en", "ca", "fr"];
 
 // Helper para sanitizar variables
@@ -25,10 +22,7 @@ export default function CrearPlantillaPage() {
   const [headerMedia, setHeaderMedia] = useState<File | null>(null);
   const [bodyText, setBodyText] = useState("");
   const [footerText, setFooterText] = useState("");
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [submitMessage, setSubmitMessage] = useState("");
   const [mediaPreview, setMediaPreview] = useState<string | null>(null);
-  const [variables, setVariables] = useState<Array<{name: string, example: string}>>([]);
   const [fileError, setFileError] = useState("");
 
   // Estados para modales
@@ -37,31 +31,6 @@ export default function CrearPlantillaPage() {
   const [showCharPrompt, setShowCharPrompt] = useState(false);
 
   const menuRef = useRef<HTMLDivElement>(null);
-
-  interface MediaUploadResponse {
-    id: string;
-    url: string;
-    [key: string]: unknown;
-  }
-
-  // Función para subir media
-  const uploadMedia = async (file: File): Promise<MediaUploadResponse> => {
-    const formData = new FormData();
-    formData.append("file", file);
-    formData.append("type", file.type.startsWith("image/") ? "image" : file.type.startsWith("video/") ? "video" : "document");
-    formData.append("messaging_product", "whatsapp");
-
-    const response = await fetch("/api/whatsapp/upload-media", {
-      method: "POST",
-      body: formData,
-    });
-
-    if (!response.ok) {
-      throw new Error("Error al subir el archivo");
-    }
-
-    return response.json() as Promise<MediaUploadResponse>;
-  };
 
   // cuando escribes algo en el nombre
   const handleNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -314,20 +283,15 @@ export default function CrearPlantillaPage() {
             <div className="pt-4">
               <button
                 onClick={canSend ? handleSendToReview : undefined}
-                disabled={!canSend || isSubmitting}
+                disabled={!canSend}
                 className={`w-full py-2 px-4 rounded-md font-medium ${
-                  canSend && !isSubmitting
+                  canSend
                     ? "bg-blue-600 hover:bg-blue-700 text-white"
                     : "bg-gray-300 text-gray-500 cursor-not-allowed"
                 }`}
               >
-                {isSubmitting ? "Enviando..." : "Enviar para Revisión"}
+                Enviar para Revisión
               </button>
-              {submitMessage && (
-                <p className={`mt-2 text-sm ${submitMessage.includes("exitosamente") ? "text-green-600" : "text-red-600"}`}>
-                  {submitMessage}
-                </p>
-              )}
             </div>
           </div>
 

@@ -1,7 +1,7 @@
 "use client";
-import React from "react";
-import { useEffect, useState } from "react";
-import { supabase } from "@/utils/supabaseClient";
+import React, { useState, useEffect } from "react";
+import Image from "next/image";
+import { supabase } from "../utils/supabaseClient";
 
 export interface Contact {
   session_id: string;
@@ -50,10 +50,12 @@ export default function ContactList({ onSelect }: ContactListProps) {
               onClick={() => onSelect(contact)}
             >
               <td className="px-4 py-2">
-                <img
+                <Image
                   src="/avatar-placeholder.png"
                   alt={contact.name}
-                  className="w-10 h-10 rounded-full object-cover"
+                  width={40}
+                  height={40}
+                  className="rounded-full object-cover"
                 />
               </td>
               <td className="px-4 py-2">{contact.name}</td>

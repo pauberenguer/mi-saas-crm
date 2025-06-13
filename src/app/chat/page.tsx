@@ -1,7 +1,7 @@
 // File: app/chat/page.tsx
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
   XCircle,
   User,
@@ -25,16 +25,25 @@ interface Note {
   message: { content: string; additional_kwargs: { origin?: string } };
   created_at?: string;
 }
+
 interface Profile {
   id: string;
   name: string;
-  avatar_url?: string;
 }
 
-interface SupabaseMessage {
+interface ConversationUpdate {
   session_id: string;
-  content: string;
+  assigned_to: string | null;
+  estado: string;
+  is_paused?: boolean;
+  etiquetas?: Record<string, unknown>;
+  last_viewed_at?: string;
+}
+
+interface ConversationMessage {
+  session_id: string;
   created_at: string;
+  content: string;
   message: Record<string, unknown>;
 }
 
@@ -51,7 +60,7 @@ export default function ChatPage() {
   const [contactPauseUntil, setContactPauseUntil] = useState<string | null>(null);
   const [timeLeft, setTimeLeft] = useState<number>(0);
   const [headerSearch, setHeaderSearch] = useState("");
-  const [currentUser, setCurrentUser] = useState<any>(null);
+  const [currentUser, setCurrentUser] = useState<Profile | null>(null);
 
   // Bulk selection
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -89,41 +98,22 @@ export default function ChatPage() {
     Todos: 0,
   });
 
-  // Función para obtener los conteos
-  const fetchCounts = async () => {
+  // Función para obtener conteos por asignación
+  const fetchCounts = useCallback(async (currentUser: Profile | null) => {
     if (!currentUser) return;
-    const labels: FilterType[] = ["No Asignado", "Tú", "Equipo", "Todos"];
-    const newCounts: Record<FilterType, number> = {
-      "No Asignado": 0,
-      Tú: 0,
-      Equipo: 0,
-      Todos: 0,
-    };
 
-    for (const label of labels) {
-      let query = supabase
-        .from("contactos")
-        .select("session_id", { count: "exact", head: true });
-
-      if (label === "No Asignado") {
-        query = query
-          .is("assigned_to", null)
-          .eq("estado", "Abierto"); // solo abiertos y sin asignar
-      } else if (label === "Tú") {
-        query = query.eq("assigned_to", currentUser.id).eq("estado", "Abierto");
-      } else if (label === "Equipo") {
-        query = query
-          .not("assigned_to", "is", null)
-          .eq("estado", "Abierto");
-      }
-      // "Todos" no modifica la query
-
-      const { count, error } = await query;
-      if (!error) newCounts[label] = count ?? 0;
+    const { data } = await supabase.from("contactos").select("assigned_to, estado");
+    const newCounts = { total: 0, noAsignado: 0, tu: 0, equipo: 0 };
+    
+    if (data) {
+      newCounts.total = data.filter(c => c.estado !== "Cerrado").length;
+      newCounts.noAsignado = data.filter(c => !c.assigned_to && c.estado !== "Cerrado").length;
+      newCounts.tu = data.filter(c => c.assigned_to === currentUser.id && c.estado !== "Cerrado").length;
+      newCounts.equipo = data.filter(c => c.assigned_to && c.assigned_to !== currentUser.id && c.estado !== "Cerrado").length;
     }
-
+    
     setCounts(newCounts);
-  };
+  }, []);
 
   // Load current user
   useEffect(() => {
@@ -136,8 +126,8 @@ export default function ChatPage() {
 
   // Una vez que sabemos quién es el usuario, traemos los conteos
   useEffect(() => {
-    fetchCounts();
-  }, [currentUser]);
+    fetchCounts(currentUser);
+  }, [currentUser, fetchCounts]);
 
   // Load profiles
   useEffect(() => {
@@ -223,30 +213,42 @@ export default function ChatPage() {
   useEffect(() => {
     if (!selectedContact) return;
     const chan = supabase
-      .channel(`contactos-realtime-${selectedContact.session_id}`)
+      .channel("contactos_updates")
       .on(
         "postgres_changes",
-        {
-          event: "UPDATE",
-          schema: "public",
-          table: "contactos",
-          filter: `session_id=eq.${selectedContact.session_id}`,
-        },
-        ({ new: u }) => {
-          setIsPaused((u as any).is_paused);
-          setContactPauseUntil((u as any).pause_until);
-          setContactEtiquetas((u as any).etiquetas || {});
+        { event: "UPDATE", schema: "public", table: "contactos" },
+        ({ new: newData }) => {
+          const contactData = newData as ConversationUpdate;
+          setSelectedContact((prev) =>
+            prev ? { ...prev, ...contactData, assigned_to: contactData.assigned_to, estado: contactData.estado }
+            : null
+          );
+          setContactEtiquetas(contactData.etiquetas || {});
+          setIsPaused(contactData.is_paused);
+          setContactPauseUntil(contactData.pause_until);
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "conversaciones" },
+        async ({ new: row }) => {
+          const messageData = row as ConversationMessage;
+          const ts = messageData.created_at;
+          setNotes((prev) => [
+            ...prev,
+            { id: row.id, message: messageData.message, created_at: ts },
+          ]);
         }
       )
       .subscribe();
     return () => supabase.removeChannel(chan);
-  }, [selectedContact?.session_id]);
+  }, [selectedContact]);
 
   // Real-time updates for notes
   useEffect(() => {
     if (!selectedContact) return;
-    const channel = supabase
-      .channel(`notes-realtime-${selectedContact.session_id}`)
+    const chan = supabase
+      .channel("individual_conversation_updates")
       .on(
         "postgres_changes",
         {
@@ -255,21 +257,17 @@ export default function ChatPage() {
           table: "conversaciones",
           filter: `session_id=eq.${selectedContact.session_id}`,
         },
-        ({ new: row }) => {
-          try {
-            const m = typeof row.message === "string" ? JSON.parse(row.message) : row.message;
-            if (m.additional_kwargs?.origin === "note") {
-              setNotes((prev) => [
-                ...prev,
-                { id: row.id, message: m, created_at: row.created_at },
-              ]);
-            }
-          } catch {}
+        ({ new: newMessage }) => {
+          const messageRow = newMessage as { message: Record<string, unknown> };
+          const msg = messageRow.message;
+          if (msg?.type === "ai" && msg?.content) {
+            void fetchMessages(selectedContact.session_id);
+          }
         }
       )
       .subscribe();
-    return () => supabase.removeChannel(channel);
-  }, [selectedContact?.session_id]);
+    return () => supabase.removeChannel(chan);
+  }, [selectedContact, fetchMessages]);
 
   // Countdown timer
   useEffect(() => {
@@ -325,7 +323,7 @@ export default function ChatPage() {
     await supabase.from("contactos").update({ assigned_to: userId }).in("session_id", selectedIds);
     setSelectedIds([]);
     setShowAssignMenu(false);
-    await fetchCounts();
+    await fetchCounts(profile);
     setShowAssignedToast(true);
     setTimeout(() => setShowAssignedToast(false), 5000);
   };
@@ -335,7 +333,7 @@ export default function ChatPage() {
     setSelectedIds([]);
     setActiveFilter("No Asignado");
     setShowAssignMenu(false);
-    await fetchCounts();
+    await fetchCounts(currentUser);
   };
   const markAsClosed = async () => {
     if (!selectedIds.length) return;
@@ -345,7 +343,7 @@ export default function ChatPage() {
       .in("session_id", selectedIds);
     setSelectedIds([]);
     setShowDeletedToast(true);
-    await fetchCounts();
+    await fetchCounts(currentUser);
     setTimeout(() => setShowDeletedToast(false), 5000);
   };
   const reOpenConversations = async () => {
@@ -357,7 +355,7 @@ export default function ChatPage() {
     setSelectedIds([]);
     setActiveFilter("No Asignado");
     setShowAssignMenu(false);
-    await fetchCounts();
+    await fetchCounts(currentUser);
     setShowReopenedToast(true);
     setTimeout(() => setShowReopenedToast(false), 5000);
   };
@@ -372,7 +370,7 @@ export default function ChatPage() {
       .update({ assigned_to: userId })
       .eq("session_id", selectedContact.session_id);
     setShowAssignMenu(false);
-    await fetchCounts();
+    await fetchCounts(profile);
     setShowAssignedToast(true);
     setTimeout(() => setShowAssignedToast(false), 5000);
   };
@@ -383,7 +381,7 @@ export default function ChatPage() {
       .update({ assigned_to: null })
       .eq("session_id", selectedContact.session_id);
     setShowAssignMenu(false);
-    await fetchCounts();
+    await fetchCounts(currentUser);
     setShowAssignedToast(true);
     setTimeout(() => setShowAssignedToast(false), 5000);
   };
@@ -1036,7 +1034,7 @@ export default function ChatPage() {
                     setShowDeletedToast(true);
                     setSelectedIds([]);
                     setShowAssignMenu(false);
-                    await fetchCounts();
+                    await fetchCounts(currentUser);
                     setTimeout(() => setShowDeletedToast(false), 5000);
                   }}
                   className="px-4 py-2 bg-red-500 text-white rounded"
