@@ -7,10 +7,24 @@ import Image from "next/image";
 import { User, Loader2, Edit } from "lucide-react";
 import { supabase } from "../../../lib/supabaseClient";
 
+interface User {
+  id: string;
+  email?: string;
+  created_at?: string;
+  user_metadata?: {
+    name?: string;
+  };
+}
+
+interface Profile {
+  id: string;
+  name: string;
+  avatar_url?: string;
+}
+
 export default function PerfilPage() {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const [user, setUser] = useState<any>(null);
-  const [profile, setProfile] = useState<{ name: string; avatar_url: string | null } | null>(null);
+  const [user, setUser] = useState<User | null>(null);
+  const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -31,23 +45,18 @@ export default function PerfilPage() {
     });
   }, []);
 
-  async function loadProfile(user: any) {
+  async function loadProfile(currentUser: User) {
     const { data, error } = await supabase
       .from("profiles")
-      .select("name, avatar_url")
-      .eq("id", user.id)
+      .select("*")
+      .eq("id", currentUser.id)
       .single();
-
     if (error) {
-      console.warn("Perfil no encontrado:", error.message);
-      const fallback = (user.user_metadata as any)?.name || "Usuario";
-      setProfile({ name: fallback, avatar_url: null });
-      setPreviewUrl("");
+      console.error("Error cargando perfil:", error.message);
+      setProfile(null);
     } else {
-      setProfile({ name: data.name, avatar_url: data.avatar_url });
-      setPreviewUrl(data.avatar_url ?? "");
+      setProfile(data);
     }
-    setLoading(false);
   }
 
   // Funciones para editar nombre
@@ -197,7 +206,7 @@ export default function PerfilPage() {
           </div>
 
           <p className="text-sm text-gray-500 mb-6">
-            {user.created_at
+            {user?.created_at
               ? `Miembro desde ${new Date(user.created_at).toLocaleDateString("es-ES", {
                   day: "numeric",
                   month: "long",

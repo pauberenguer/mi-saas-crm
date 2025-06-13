@@ -52,8 +52,9 @@ export default function ContactosPage() {
     if (c.etiquetas) {
       Object.values(c.etiquetas).forEach(v => {
         const t = v.trim();
-        if (!t) return;
-        tagCounts[t] = (tagCounts[t] || 0) + 1;
+        if (t) {
+          tagCounts[t] = (tagCounts[t] || 0) + 1;
+        }
       });
     }
   });
@@ -198,27 +199,10 @@ export default function ContactosPage() {
   };
 
   return (
-    <>
-      <style jsx>{`
-        @keyframes fadeIn {
-          from {
-            opacity: 0;
-            transform: translateY(10px);
-          }
-          to {
-            opacity: 1;
-            transform: translateY(0);
-          }
-        }
-        .animate-fadeIn {
-          animation: fadeIn 0.5s ease-in-out forwards;
-        }
-      `}</style>
-
-      <div
-        className="min-h-screen bg-[#f9fafb] p-8 animate-fadeIn"
-        onClick={() => setShowActionsMenu(false)}
-      >
+    <div
+      className="min-h-screen bg-[#f9fafb] p-8 animate-fade-in"
+      onClick={() => setShowActionsMenu(false)}
+    >
         {/* Header */}
         <header className="mb-2 animate-fadeIn">
           <h1 className="text-3xl font-bold text-[#1d1d1d]">Contactos</h1>
@@ -563,6 +547,5 @@ export default function ContactosPage() {
           </div>
         )}
       </div>
-    </>
   );
 }

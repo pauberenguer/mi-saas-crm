@@ -31,6 +31,13 @@ interface Profile {
   avatar_url?: string;
 }
 
+interface SupabaseMessage {
+  session_id: string;
+  content: string;
+  created_at: string;
+  message: Record<string, unknown>;
+}
+
 // Extend BaseContact to include assigned_to and estado
 type Contact = BaseContact & { assigned_to: string | null; estado: string };
 

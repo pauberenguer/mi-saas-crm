@@ -48,7 +48,7 @@ interface ContactListMiniProps {
   onSelect: (contact: Contact) => void;
   selectedContactId?: string;
   filter: FilterType;
-  currentUser: any;
+  currentUser: Profile | null;
   selectedIds?: string[];
   onSelectionChange: (ids: string[]) => void;
 }
@@ -200,9 +200,10 @@ export default function ContactListMini({
       "postgres_changes",
       {event:"INSERT",schema:"public",table:"conversaciones"},
       async ({ new: row }) => {
-        const sid = (row as any).session_id as string;
-        const ts  = (row as any).created_at as string;
-        const msg = (row as any).content    as string;
+        const conversationRow = row as { session_id: string; created_at: string; content: string };
+        const sid = conversationRow.session_id;
+        const ts  = conversationRow.created_at;
+        const msg = conversationRow.content;
         setLastMessageAt(p=>({...p,[sid]:ts}));
 
         const { data: upd } = await supabase
@@ -225,32 +226,33 @@ export default function ContactListMini({
 
   /* ───────────── UPDATE contactos ───────────── */
   useEffect(() => {
-    const chan = supabase.channel("contactos-updates").on(
+    const chan = supabase.channel("contactos-changes").on(
       "postgres_changes",
       {event:"UPDATE",schema:"public",table:"contactos"},
-      ({ new: upd }) => {
-        setContacts(prev=>prev
-          .map(c=>c.session_id===upd.session_id ? {
-              ...c,
-              is_paused:      (upd as any).is_paused,
-              estado:         (upd as any).estado,
-              etiquetas:      (upd as any).etiquetas,
-              last_viewed_at: (upd as any).last_viewed_at,
-              assigned_to:    (upd as any).assigned_to,
-            } : c)
-          .filter(c=>{
-            if (filter !== "Todos" && c.estado==="Cerrado") return false;
-            if (filter==="Todos" && statusFilter!=="Todos" && c.estado!==statusFilter) return false;
-            if (filter==="No Asignado" && c.assigned_to!=null) return false;
-            if (filter==="Tú" && c.assigned_to!==currentUser?.id) return false;
-            if (filter==="Equipo" && selectedFolder && c.assigned_to!==selectedFolder) return false;
-            return true;
-          })
-        );
+      ({ new: row }) => {
+        const contactRow = row as Contact;
+        setContacts(prev => prev.map(c => c.session_id === contactRow.session_id ? contactRow : c));
+      }
+    ).on(
+      "postgres_changes",
+      {event:"INSERT",schema:"public",table:"contactos"},
+      ({ new: row }) => {
+        const contactRow = row as Contact;
+        setContacts(prev => {
+          if (prev.some(c => c.session_id === contactRow.session_id)) return prev;
+          return [...prev, contactRow];
+        });
+      }
+    ).on(
+      "postgres_changes",
+      {event:"DELETE",schema:"public",table:"contactos"},
+      ({ old: row }) => {
+        const contactRow = row as Contact;
+        setContacts(prev => prev.filter(c => c.session_id !== contactRow.session_id));
       }
     ).subscribe();
-    return ()=>{ void supabase.removeChannel(chan); };
-  },[filter,statusFilter,currentUser?.id,selectedFolder]);
+    return () => { void supabase.removeChannel(chan); };
+  }, []);
 
   /* ───────────── Selección ───────────── */
   const handleSelect = async (c: Contact) => {
