@@ -5,7 +5,7 @@ import React from "react";
 import { useState, useEffect } from "react";
 import Image from "next/image";
 import { User, Loader2, Edit } from "lucide-react";
-import { supabase } from "../../../lib/supabaseClient";
+import { supabase } from "../../../utils/supabaseClient";
 
 interface User {
   id: string;

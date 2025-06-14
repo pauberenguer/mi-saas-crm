@@ -31,6 +31,7 @@ import {
   Play,
   Video,
 } from "lucide-react";
+import { MessageContent, MessageType, MessageOrigin } from "../types/database";
 
 /* ----------------------------------------------------------------------- */
 /*  Tipos y helpers básicos                                                */
@@ -93,6 +94,35 @@ async function convertWebmToOgg(webm: Blob): Promise<Blob> {
 }
 
 /* ----------------------------------------------------------------------- */
+/*  Helper para insertar mensajes con manejo de errores                    */
+/* ----------------------------------------------------------------------- */
+async function insertMessage(
+  contactId: string, 
+  messageData: MessageContent, 
+  errorPrefix: string
+): Promise<boolean> {
+  // Crear el objeto para insertar sin incluir el campo 'id' 
+  // ya que debería ser autogenerado por PostgreSQL
+  const insertData = {
+    session_id: contactId,
+    message: messageData,
+    // Omitimos 'id' para que PostgreSQL lo genere automáticamente
+    // Omitimos 'created_at' para usar el default de la tabla
+  };
+
+  const { error } = await supabase.from("conversaciones").insert([insertData]);
+
+  if (error) {
+    console.error(`${errorPrefix}:`, error);
+    console.error("Datos del mensaje que causó el error:", JSON.stringify(messageData, null, 2));
+    console.error("Contact ID:", contactId);
+    console.error("Detalles del error de Supabase:", error);
+    return false;
+  }
+  return true;
+}
+
+/* ----------------------------------------------------------------------- */
 /*  Componente principal                                                   */
 /* ----------------------------------------------------------------------- */
 export default function Conversation({
@@ -126,6 +156,9 @@ export default function Conversation({
 
   const [isLocked, setIsLocked] = useState(false);
   const [highlightId, setHighlightId] = useState<number | null>(null);
+  
+  // Estado para modal de imagen ampliada
+  const [enlargedImage, setEnlargedImage] = useState<string | null>(null);
 
   /* ---------------- REFERENCIAS ------------------------ */
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -335,6 +368,79 @@ export default function Conversation({
     }
   };
 
+  // Funciones para modal de imagen ampliada
+  const openImageModal = (imageSrc: string) => {
+    setEnlargedImage(imageSrc);
+  };
+
+  const closeImageModal = () => {
+    setEnlargedImage(null);
+  };
+
+  // Efecto para cerrar modal con tecla Escape
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && enlargedImage) {
+        closeImageModal();
+      }
+    };
+
+    if (enlargedImage) {
+      document.addEventListener('keydown', handleKeyDown);
+      return () => document.removeEventListener('keydown', handleKeyDown);
+    }
+  }, [enlargedImage]);
+
+  // Función para agrupar imágenes consecutivas de la IA
+  const groupConsecutiveAIImages = (messages: MessageRow[]) => {
+    const grouped: (MessageRow | (MessageRow & { isImageGroup: true; images: MessageRow[] }))[] = [];
+    let currentGroup: MessageRow[] = [];
+
+    for (let i = 0; i < messages.length; i++) {
+      const msg = messages[i];
+      const m = typeof msg.message === "string" ? JSON.parse(msg.message) : msg.message;
+      const content = (m.content || "").trim();
+      const isAIImage = m.type === "ai" && IMG_RE.test(content) && m.etiquetas?.fotos === true;
+
+      if (isAIImage) {
+        currentGroup.push(msg);
+      } else {
+        // Si hay un grupo acumulado, lo agregamos
+        if (currentGroup.length > 0) {
+          if (currentGroup.length === 1) {
+            // Si solo hay una imagen, la agregamos como mensaje individual
+            grouped.push(currentGroup[0]);
+          } else {
+            // Si hay múltiples imágenes, las agrupamos
+            grouped.push({
+              ...currentGroup[0],
+              isImageGroup: true,
+              images: currentGroup
+            });
+          }
+          currentGroup = [];
+        }
+        // Agregamos el mensaje actual
+        grouped.push(msg);
+      }
+    }
+
+    // Procesar el último grupo si existe
+    if (currentGroup.length > 0) {
+      if (currentGroup.length === 1) {
+        grouped.push(currentGroup[0]);
+      } else {
+        grouped.push({
+          ...currentGroup[0],
+          isImageGroup: true,
+          images: currentGroup
+        });
+      }
+    }
+
+    return grouped;
+  };
+
   /* ------------------------------------------------------------------- */
   /* 6) Selección de plantilla                                           */
   /* ------------------------------------------------------------------- */
@@ -472,18 +578,15 @@ export default function Conversation({
       const { data: urlData } = supabase.storage.from("conversaciones").getPublicUrl(path);
       const audioUrl = urlData.publicUrl;
 
-      await supabase.from("conversaciones").insert([
-        {
-          session_id: contactId,
-          message: {
-            type: "human",
-            content: audioUrl,
-            etiquetas: { audio: true },  // audio mantiene etiqueta
-            additional_kwargs: { origin: "crm" },
-            response_metadata: {},
-          },
-        },
-      ]);
+      const audioMessage: MessageContent = {
+        type: "human" as MessageType,
+        content: audioUrl,
+        etiquetas: { audio: true },  // audio mantiene etiqueta
+        additional_kwargs: { origin: "crm" as MessageOrigin },
+        response_metadata: {},
+      };
+
+      await insertMessage(contactId, audioMessage, "Error al insertar audio");
 
       setRecording(false);
       setPaused(false);
@@ -537,17 +640,17 @@ export default function Conversation({
     /* bloqueo + plantilla (>24 h) */
     if (responderLocked) {
       if (!selectedTpl) return;
-      await supabase.from("conversaciones").insert([
-        {
-          session_id: contactId,
-          message: {
-            type: "human",
-            content: selectedTpl.body_text,
-            additional_kwargs: { origin: messageOrigin },
-            response_metadata: {},
-          },
-        },
-      ]);
+      const templateMessage: MessageContent = {
+        type: "human" as MessageType,
+        content: selectedTpl.body_text,
+        additional_kwargs: { origin: messageOrigin as MessageOrigin },
+        response_metadata: {},
+      };
+
+      const success = await insertMessage(contactId, templateMessage, "Error al insertar plantilla");
+      if (!success) {
+        return;
+      }
       await fetch("https://n8n.asisttente.com/webhook/elgloboenviarplantilla", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -573,18 +676,18 @@ export default function Conversation({
           .getPublicUrl(path);
         const publicUrl = urlData.publicUrl;
 
-        await supabase.from("conversaciones").insert([
-          {
-            session_id: contactId,
-            message: {
-              type: "human",
-              content: publicUrl,
-              etiquetas: { video: true },               // ★ etiqueta video
-              additional_kwargs: { origin: messageOrigin },
-              response_metadata: {},
-            },
-          },
-        ]);
+        const videoMessage: MessageContent = {
+          type: "human" as MessageType,
+          content: publicUrl,
+          etiquetas: { video: true },               // ★ etiqueta video
+          additional_kwargs: { origin: messageOrigin as MessageOrigin },
+          response_metadata: {},
+        };
+
+        const success = await insertMessage(contactId, videoMessage, "Error al insertar vídeo");
+        if (!success) {
+          continue;
+        }
 
         if (messageMode === "Responder" && !isLocked) {
           await fetch("https://n8n.asisttente.com/webhook/elglobobot", {
@@ -711,17 +814,17 @@ export default function Conversation({
     if (!newMessage.trim() && !selectedTpl) return;
     const finalText = selectedTpl ? selectedTpl.body_text : newMessage.trim();
 
-    await supabase.from("conversaciones").insert([
-      {
-        session_id: contactId,
-        message: {
-          type: "human",
-          content: finalText,
-          additional_kwargs: { origin: messageOrigin },
-          response_metadata: {},
-        },
-      },
-    ]);
+    const textMessage: MessageContent = {
+      type: "human" as MessageType,
+      content: finalText,
+      additional_kwargs: { origin: messageOrigin as MessageOrigin },
+      response_metadata: {},
+    };
+
+    const success = await insertMessage(contactId, textMessage, "Error al insertar mensaje de texto");
+    if (!success) {
+      return;
+    }
 
     if (messageMode === "Responder" && !isLocked && !selectedTpl) {
       await fetch("https://n8n.asisttente.com/webhook/elglobobot", {
@@ -792,7 +895,85 @@ export default function Conversation({
 
       {/* conversación */}
       <div className="h-[568px] overflow-y-auto p-4 mb-2">
-        {filteredMessages.map((row) => {
+        {groupConsecutiveAIImages(filteredMessages).map((row) => {
+          // Si es un grupo de imágenes, renderizar de manera especial
+          if ('isImageGroup' in row && row.isImageGroup) {
+            const imageGroup = row as MessageRow & { isImageGroup: true; images: MessageRow[] };
+            return (
+              <div
+                key={`group-${imageGroup.id}`}
+                className="mb-2 flex items-center gap-2 justify-end group relative"
+                ref={(el) => {
+                  if (el) msgRefs.current.set(imageGroup.id, el);
+                }}
+              >
+                {/* Grid de imágenes agrupadas estilo WhatsApp */}
+                <div className="inline-block max-w-[280px]">
+                  <div className={`grid gap-1 ${
+                    imageGroup.images.length === 2 ? 'grid-cols-2' :
+                    imageGroup.images.length === 3 ? 'grid-cols-2' :
+                    imageGroup.images.length >= 4 ? 'grid-cols-2' : 'grid-cols-1'
+                  }`}>
+                    {imageGroup.images.map((imgMsg: MessageRow, index: number) => {
+                      const imgData = typeof imgMsg.message === "string" ? JSON.parse(imgMsg.message) : imgMsg.message;
+                      const imgContent = (imgData.content || "").trim();
+                      
+                      // Determinar el estilo de borde según la posición
+                      let borderRadius = '';
+                      if (imageGroup.images.length === 2) {
+                        borderRadius = index === 0 ? 'rounded-tl-2xl rounded-bl-2xl rounded-tr-md rounded-br-md' : 'rounded-tr-2xl rounded-br-2xl rounded-tl-md rounded-bl-md';
+                      } else if (imageGroup.images.length === 3) {
+                        if (index === 0) borderRadius = 'rounded-tl-2xl rounded-bl-md rounded-tr-md rounded-br-md';
+                        else if (index === 1) borderRadius = 'rounded-tr-2xl rounded-br-md rounded-tl-md rounded-bl-md';
+                        else borderRadius = 'rounded-bl-2xl rounded-br-2xl rounded-tl-md rounded-tr-md';
+                      } else if (imageGroup.images.length >= 4) {
+                        if (index === 0) borderRadius = 'rounded-tl-2xl rounded-tr-md rounded-bl-md rounded-br-md';
+                        else if (index === 1) borderRadius = 'rounded-tr-2xl rounded-tl-md rounded-br-md rounded-bl-md';
+                        else if (index === imageGroup.images.length - 2) borderRadius = 'rounded-bl-2xl rounded-br-md rounded-tl-md rounded-tr-md';
+                        else if (index === imageGroup.images.length - 1) borderRadius = 'rounded-br-2xl rounded-bl-md rounded-tr-md rounded-tl-md';
+                        else borderRadius = 'rounded-md';
+                      } else {
+                        borderRadius = 'rounded-2xl';
+                      }
+                      
+                      return (
+                        <div
+                          key={imgMsg.id}
+                          className={`${
+                            imageGroup.images.length === 3 && index === 2 ? 'col-span-2' : ''
+                          } overflow-hidden`}
+                        >
+                          <img
+                            src={imgContent}
+                            alt={`img-${index}`}
+                            className={`w-full h-32 object-cover cursor-pointer hover:opacity-90 transition-opacity ${borderRadius}`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openImageModal(imgContent);
+                            }}
+                          />
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Avatar de la IA */}
+                <img
+                  src="/marta.png"
+                  alt="ai"
+                  className="w-8 h-8 rounded-full object-cover"
+                />
+
+                {/* Timestamp */}
+                <span className="absolute -top-6 whitespace-nowrap text-xs bg-black text-white px-1 rounded shadow opacity-0 group-hover:opacity-100 right-0">
+                  {imageGroup.created_at ? new Date(imageGroup.created_at).toLocaleString() : ""}
+                </span>
+              </div>
+            );
+          }
+
+          // Renderizado normal para mensajes individuales
           const m =
             typeof row.message === "string"
               ? JSON.parse(row.message)
@@ -879,7 +1060,11 @@ export default function Conversation({
                       <img
                         src={refContent}
                         alt="ref"
-                        className="w-12 h-12 object-cover rounded"
+                        className="w-12 h-12 object-cover rounded cursor-pointer hover:opacity-90 transition-opacity"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openImageModal(refContent);
+                        }}
                       />
                     ) : (
                       <span>{buildSnippet(referenced)}</span>
@@ -891,7 +1076,11 @@ export default function Conversation({
                   <img
                     src={content}
                     alt="img"
-                    className="w-60 h-80 object-cover rounded-lg"
+                    className="max-w-xs max-h-80 object-contain rounded-lg cursor-pointer hover:opacity-90 transition-opacity"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      openImageModal(content);
+                    }}
                   />
                 )}
                 {isPdf && (
@@ -933,7 +1122,7 @@ export default function Conversation({
                   </>
                 )}
                 {isVid && (
-                  <video controls className="w-60 h-80 object-cover rounded-lg">
+                  <video controls className="max-w-xs max-h-80 object-contain rounded-lg">
                     <source src={content} type="video/mp4" />
                     Tu navegador no soporta vídeo.
                   </video>
@@ -1178,8 +1367,31 @@ export default function Conversation({
             : selectedTpl
             ? "Enviar Plantilla"
             : "Enviar Whatsapp"}
-        </button>
-      </div>
-    </div>
-  );
-}
+                 </button>
+       </div>
+
+       {/* Modal de imagen ampliada */}
+       {enlargedImage && (
+         <div
+           className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50"
+           onClick={closeImageModal}
+         >
+           <div className="relative max-w-[90vw] max-h-[90vh]">
+             <img
+               src={enlargedImage}
+               alt="Imagen ampliada"
+               className="max-w-full max-h-full object-contain"
+               onClick={(e) => e.stopPropagation()}
+             />
+             <button
+               onClick={closeImageModal}
+               className="absolute top-4 right-4 text-white bg-black bg-opacity-50 rounded-full w-10 h-10 flex items-center justify-center hover:bg-opacity-75 transition-all"
+             >
+               ×
+             </button>
+           </div>
+         </div>
+       )}
+     </div>
+   );
+ }

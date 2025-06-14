@@ -146,6 +146,7 @@ export default function ContactListMini({
   const iconFor = (t: MediaType) =>
     t==="image"? "Foto 📷" : t==="audio"? "Audio 🎵" : t==="video"? "Video 🎥" : "";
   const truncate = (str: string, max=28)=> str.length>max? str.slice(0,max)+"..." : str;
+  const truncateName = (name: string) => name.length > 10 ? name.slice(0, 10) + "..." : name;
 
   const getPreview = (msg: string, sid: string): string => {
     const detected = detectMediaType(msg);
@@ -309,7 +310,7 @@ export default function ContactListMini({
               onClick={()=>setSelectedFolder(p.id)}>
               <div className="flex items-center">
                 <Folder className="w-5 h-5 text-gray-500 mr-3"/>
-                <span className="text-gray-800">{p.name}</span>
+                <span className="text-gray-800">{truncateName(p.name)}</span>
               </div>
               <span className="text-gray-500 text-sm">{counts[p.id]||0}</span>
             </li>
@@ -431,7 +432,7 @@ export default function ContactListMini({
                       )}
                     </div>
                     <div className="ml-3 flex-1">
-                      <div className={`${unread?"text-gray-800 font-semibold":"text-gray-600"}`}>{c.name}</div>
+                      <div className={`${unread?"text-gray-800 font-semibold":"text-gray-600"}`}>{truncateName(c.name)}</div>
                       <div className={`${unread?"text-gray-700":"text-gray-500"} text-xs`}>{preview}</div>
                     </div>
                   </div>
