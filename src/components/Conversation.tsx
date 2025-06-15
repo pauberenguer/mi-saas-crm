@@ -1221,10 +1221,9 @@ export default function Conversation({
 
         {/* input */}
         <div className="relative flex-1">
-          <input
-            type="text"
+          <textarea
             disabled={responderLocked || recording}
-            className={`w-full p-3 rounded focus:outline-none ${
+            className={`w-full p-3 rounded focus:outline-none resize-none min-h-[48px] max-h-[120px] ${
               messageMode === "Nota" ? "bg-[#fdf0d0]" : "bg-white"
             } ${
               recording || (responderLocked && !selectedTpl) ? "opacity-50" : ""
@@ -1249,7 +1248,31 @@ export default function Conversation({
               setNewMessage(e.target.value);
               if (selectedTpl) setSelectedTpl(null);
             }}
-            onKeyDown={(e) => e.key === "Enter" && canSend && sendMessage()}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                if (e.shiftKey) {
+                  // Shift + Enter: agregar salto de línea (comportamiento por defecto)
+                  return;
+                } else {
+                  // Solo Enter: enviar mensaje
+                  e.preventDefault();
+                  if (canSend) {
+                    sendMessage();
+                  }
+                }
+              }
+            }}
+            rows={1}
+            style={{
+              lineHeight: '1.5',
+              overflow: 'hidden',
+            }}
+            onInput={(e) => {
+              // Auto-resize del textarea
+              const target = e.target as HTMLTextAreaElement;
+              target.style.height = 'auto';
+              target.style.height = Math.min(target.scrollHeight, 120) + 'px';
+            }}
           />
 
           {/* previews */}
