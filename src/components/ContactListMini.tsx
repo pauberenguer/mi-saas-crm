@@ -204,21 +204,64 @@ export default function ContactListMini({
       "postgres_changes",
       {event:"INSERT",schema:"public",table:"conversaciones"},
       async ({ new: row }) => {
-        const conversationRow = row as { session_id: string; created_at: string; content: string };
+        const conversationRow = row as { session_id: string; created_at: string; content: string; message: any };
         const sid = conversationRow.session_id;
         const ts  = conversationRow.created_at;
         const msg = conversationRow.content;
+        const message = conversationRow.message;
+        
         setLastMessageAt(p=>({...p,[sid]:ts}));
 
-        const { data: upd } = await supabase
-          .from("contactos")
-          .select("last_customer_message")
-          .eq("session_id",sid)
-          .single();
-        if (upd?.last_customer_message) {
-          setContacts(prev=>prev.map(c=>c.session_id===sid
-            ? {...c,last_customer_message: upd.last_customer_message}
-            : c));
+        // Verificar si es un mensaje de cliente y si el contacto está cerrado
+        const isHumanMessage = message?.type === "human";
+        const origin = message?.additional_kwargs?.origin;
+        const isFromClient = isHumanMessage && !origin;
+
+        if (isFromClient) {
+          // Obtener el estado actual del contacto
+          const { data: contact } = await supabase
+            .from("contactos")
+            .select("estado, last_customer_message")
+            .eq("session_id", sid)
+            .single();
+
+          if (contact) {
+            // Si está cerrado, reabrirlo
+            if (contact.estado === "Cerrado") {
+              await supabase
+                .from("contactos")
+                .update({ estado: "Abierto" })
+                .eq("session_id", sid);
+              
+              // Actualizar el estado local
+              setContacts(prev => prev.map(c => 
+                c.session_id === sid 
+                  ? { ...c, estado: "Abierto", last_customer_message: contact.last_customer_message }
+                  : c
+              ));
+            } else {
+              // Solo actualizar el último mensaje si no se cambió el estado
+              setContacts(prev => prev.map(c => 
+                c.session_id === sid
+                  ? { ...c, last_customer_message: contact.last_customer_message }
+                  : c
+              ));
+            }
+          }
+        } else {
+          // Para mensajes que no son del cliente, solo actualizar el último mensaje
+          const { data: upd } = await supabase
+            .from("contactos")
+            .select("last_customer_message")
+            .eq("session_id", sid)
+            .single();
+          if (upd?.last_customer_message) {
+            setContacts(prev => prev.map(c => 
+              c.session_id === sid
+                ? { ...c, last_customer_message: upd.last_customer_message }
+                : c
+            ));
+          }
         }
 
         const mType = detectMediaType(msg);
@@ -235,17 +278,55 @@ export default function ContactListMini({
       {event:"UPDATE",schema:"public",table:"contactos"},
       ({ new: row }) => {
         const contactRow = row as Contact;
-        setContacts(prev => prev.map(c => c.session_id === contactRow.session_id ? contactRow : c));
+        
+        setContacts(prev => {
+          const updatedContacts = prev.map(c => c.session_id === contactRow.session_id ? contactRow : c);
+          
+          // Aplicar filtros inmediatamente para remover contactos que ya no pertenecen al filtro actual
+          return updatedContacts.filter(c => {
+            switch (filter) {
+              case "No Asignado":
+                return !c.assigned_to && c.estado !== "Cerrado";
+              case "Tú":
+                return c.assigned_to === currentUser?.id && c.estado !== "Cerrado";
+              case "Equipo":
+                return c.assigned_to && c.estado !== "Cerrado";
+              case "Todos":
+                return true; // Todos incluye todos los estados
+              default:
+                return true;
+            }
+          });
+        });
       }
     ).on(
       "postgres_changes",
       {event:"INSERT",schema:"public",table:"contactos"},
       ({ new: row }) => {
         const contactRow = row as Contact;
-        setContacts(prev => {
-          if (prev.some(c => c.session_id === contactRow.session_id)) return prev;
-          return [...prev, contactRow];
-        });
+        
+        // Solo agregar si corresponde al filtro actual
+        const shouldInclude = (() => {
+          switch (filter) {
+            case "No Asignado":
+              return !contactRow.assigned_to && contactRow.estado !== "Cerrado";
+            case "Tú":
+              return contactRow.assigned_to === currentUser?.id && contactRow.estado !== "Cerrado";
+            case "Equipo":
+              return contactRow.assigned_to && contactRow.estado !== "Cerrado";
+            case "Todos":
+              return true;
+            default:
+              return true;
+          }
+        })();
+        
+        if (shouldInclude) {
+          setContacts(prev => {
+            if (prev.some(c => c.session_id === contactRow.session_id)) return prev;
+            return [...prev, contactRow];
+          });
+        }
       }
     ).on(
       "postgres_changes",
@@ -256,7 +337,7 @@ export default function ContactListMini({
       }
     ).subscribe();
     return () => { void supabase.removeChannel(chan); };
-  }, []);
+  }, [filter, currentUser?.id]);
 
   /* ───────────── Selección ───────────── */
   const handleSelect = async (c: Contact) => {
@@ -295,30 +376,56 @@ export default function ContactListMini({
     onSelectionChange!(next);
   };
 
+  /* ───────────── Componente de carga ───────────── */
+  const LoadingSpinner = () => (
+    <div className="flex items-center justify-center text-gray-500">
+      <span>Cargando…</span>
+    </div>
+  );
+
   /* ───────────── Carga ───────────── */
   if (loadingProfiles && filter==="Equipo" && !selectedFolder)
-    return <div className="p-4 text-center text-gray-500">Cargando…</div>;
-  if (filter==="Equipo" && selectedFolder===null)
     return (
-      <div className="overflow-y-auto bg-white p-4 rounded shadow h-full">
-        <div className="text-center mb-2 text-gray-600">{headerTitle}</div>
-        <hr className="border-t border-gray-300 mb-2" />
-        <ul className="divide-y divide-gray-200">
-          {profiles.map(p=>(
-            <li key={p.id}
-              className="flex items-center justify-between py-2 cursor-pointer hover:bg-gray-50"
-              onClick={()=>setSelectedFolder(p.id)}>
-              <div className="flex items-center">
-                <Folder className="w-5 h-5 text-gray-500 mr-3"/>
-                <span className="text-gray-800">{truncateName(p.name)}</span>
-              </div>
-              <span className="text-gray-500 text-sm">{counts[p.id]||0}</span>
-            </li>
-          ))}
-        </ul>
+      <div className="bg-white p-4 rounded shadow h-full flex flex-col">
+        <div className="text-center mb-2 text-gray-600 flex-shrink-0">{headerTitle}</div>
+        <hr className="border-t border-gray-300 mb-2 flex-shrink-0" />
+        <div className="flex-1 flex items-center justify-center min-h-0">
+          <LoadingSpinner />
+        </div>
       </div>
     );
-  if (loading) return <div className="p-4 text-center text-gray-500">Cargando…</div>;
+  if (filter==="Equipo" && selectedFolder===null)
+    return (
+      <div className="bg-white p-4 rounded shadow h-full flex flex-col">
+        <div className="text-center mb-2 text-gray-600 flex-shrink-0">{headerTitle}</div>
+        <hr className="border-t border-gray-300 mb-2 flex-shrink-0" />
+        <div className="flex-1 overflow-y-auto min-h-0">
+          <ul className="divide-y divide-gray-200">
+            {profiles.map(p=>(
+              <li key={p.id}
+                className="flex items-center justify-between py-2 cursor-pointer hover:bg-gray-50"
+                onClick={()=>setSelectedFolder(p.id)}>
+                <div className="flex items-center">
+                  <Folder className="w-5 h-5 text-gray-500 mr-3"/>
+                  <span className="text-gray-800">{truncateName(p.name)}</span>
+                </div>
+                <span className="text-gray-500 text-sm">{counts[p.id]||0}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
+    );
+  if (loading) 
+    return (
+      <div className="bg-white p-4 rounded shadow h-full flex flex-col">
+        <div className="text-center mb-2 text-gray-600 flex-shrink-0">{headerTitle}</div>
+        <hr className="border-t border-gray-300 mb-2 flex-shrink-0" />
+        <div className="flex-1 flex items-center justify-center min-h-0">
+          <LoadingSpinner />
+        </div>
+      </div>
+    );
 
   /* ───────────── Filtrado y orden ───────────── */
   const filtered = contacts.filter(c=>{
@@ -340,12 +447,12 @@ export default function ContactListMini({
 
   /* ───────────── Render ───────────── */
   return (
-    <div className="overflow-y-auto bg-white p-4 rounded shadow h-full">
-      <div className="text-center mb-2 text-gray-600">{headerTitle}</div>
-      <hr className="border-t border-gray-300 mb-2" />
+    <div className="bg-white p-4 rounded shadow h-full flex flex-col">
+      <div className="text-center mb-2 text-gray-600 flex-shrink-0">{headerTitle}</div>
+      <hr className="border-t border-gray-300 mb-2 flex-shrink-0" />
 
       {/* CONTROLES */}
-      <div className="flex items-center mb-2">
+      <div className="flex items-center mb-2 flex-shrink-0">
         <input type="checkbox" className="form-checkbox h-4 w-4 text-gray-600 mr-2"
           checked={allChecked} onChange={e=>toggleAll(e.target.checked)}/>
         <span className="text-gray-600 mr-1">{filter==="Todos"?statusFilter:"Abrir"}</span>
@@ -400,11 +507,12 @@ export default function ContactListMini({
         </div>
       </div>
 
-      <hr className="border-t border-gray-300 mb-2" />
+      <hr className="border-t border-gray-300 mb-2 flex-shrink-0" />
 
       {/* LISTADO */}
-      <table className="min-w-full">
-        <tbody className="divide-y divide-gray-200">
+      <div className="flex-1 overflow-y-auto min-h-0">
+        <table className="min-w-full">
+          <tbody className="divide-y divide-gray-200">
           {sorted.map(c=>{
             const secs    = diffSeconds(lastMessageAt[c.session_id]);
             const preview = getPreview(c.last_customer_message,c.session_id);
@@ -441,7 +549,7 @@ export default function ContactListMini({
                   {unread && (
                     <span className="inline-block w-2 h-2 bg-blue-500 rounded-full mr-1 transform -translate-y-0.5"/>
                   )}
-                  <span className={unread?"text-blue-500":"text-gray-500"}>{formatDiff(secs)}</span>
+                  <span className={`whitespace-nowrap ${unread?"text-blue-500":"text-gray-500"}`}>{formatDiff(secs)}</span>
                 </td>
               </tr>
             );
@@ -451,6 +559,7 @@ export default function ContactListMini({
           )}
         </tbody>
       </table>
+      </div>
     </div>
   );
 }

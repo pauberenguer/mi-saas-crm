@@ -15,6 +15,10 @@ import {
   Play,
   Pause,
   ChevronDown,
+  Plus,
+  X,
+  Clock,
+  FolderOpen,
 } from "lucide-react";
 import ContactListMini, { Contact as BaseContact, FilterType } from "../../components/ContactListMini";
 import Conversation from "../../components/Conversation";
@@ -85,6 +89,11 @@ export default function ChatPage() {
   const [showReopenedToast, setShowReopenedToast] = useState(false);
   const [assignedToName, setAssignedToName] = useState<string>("");
 
+  // Nueva etiqueta
+  const [showAddTagForm, setShowAddTagForm] = useState(false);
+  const [newTagValue, setNewTagValue] = useState("");
+  const [showTagAddedToast, setShowTagAddedToast] = useState(false);
+
   // Assign menu refs
   const assignButtonRef = useRef<HTMLButtonElement>(null);
   const assignMenuRef = useRef<HTMLDivElement>(null);
@@ -107,11 +116,14 @@ export default function ChatPage() {
     const newCounts: Record<FilterType, number> = { "Todos": 0, "No Asignado": 0, "Tú": 0, "Equipo": 0 };
     
     if (data) {
-      newCounts["Todos"] = data.filter(c => c.estado !== "Cerrado").length;
+      // Todos: suma de Abiertos + Cerrados (todos los contactos)
+      newCounts["Todos"] = data.length;
+      // No Asignado: solo contactos sin asignar y abiertos
       newCounts["No Asignado"] = data.filter(c => !c.assigned_to && c.estado !== "Cerrado").length;
+      // Tú: solo tus contactos abiertos
       newCounts["Tú"] = data.filter(c => c.assigned_to === currentUser.id && c.estado !== "Cerrado").length;
-      // Equipo incluye TODOS los contactos asignados (incluyendo los tuyos)
-      newCounts["Equipo"] = data.filter(c => c.assigned_to && c.estado !== "Cerrado").length;
+      // Equipo: TODOS los contactos asignados (Abiertos + Cerrados)
+      newCounts["Equipo"] = data.filter(c => c.assigned_to).length;
     }
     
     setCounts(newCounts);
@@ -467,6 +479,35 @@ export default function ChatPage() {
     setContactEtiquetas(updated);
   };
 
+  const addNewTag = async () => {
+    if (!selectedContact || !newTagValue.trim()) return;
+    
+    const existingTags = contactEtiquetas || {};
+    
+    // Generar una clave única para la nueva etiqueta
+    let counter = 1;
+    let tagKey = `Custom ${counter}`;
+    while (existingTags[tagKey]) {
+      counter++;
+      tagKey = `Custom ${counter}`;
+    }
+    
+    const updatedTags = { ...existingTags, [tagKey]: newTagValue.trim() };
+    
+    const { error } = await supabase
+      .from("contactos")
+      .update({ etiquetas: updatedTags })
+      .eq("session_id", selectedContact.session_id);
+    
+    if (!error) {
+      setContactEtiquetas(updatedTags);
+      setNewTagValue("");
+      setShowAddTagForm(false);
+      setShowTagAddedToast(true);
+      setTimeout(() => setShowTagAddedToast(false), 3000);
+    }
+  };
+
   // Select contact
   const handleSelectContact = async (c: BaseContact) => {
     if (selectedContact) {
@@ -523,7 +564,7 @@ export default function ChatPage() {
           style={{ borderColor: "#4d4d4d" }}
         />
 
-        <div className="flex flex-1">
+        <div className="flex h-[calc(100vh-150px)]">
           {/* Sidebar Filters */}
           <aside className="w-48 p-4">
             <h2 className="text-xl font-bold mb-4">Conversaciones</h2>
@@ -778,83 +819,15 @@ export default function ChatPage() {
             ) : selectedContact ? (
               <>
                 <div className="flex-1">
-                  <div className="bg-white shadow rounded p-4 h-full flex flex-col">
-                    {/* Header dinámico con avatar y flecha */}
-                    <div className="mb-2 flex items-center">
-                      {assignedProfile ? (
-                        <div className="flex items-center space-x-2">
-                          <img
-                            src={assignedProfile.avatar_url || "/avatar-placeholder.png"}
-                            alt={assignedProfile.name}
-                            className="w-6 h-6 rounded-full"
-                          />
-                          <span className="text-sm text-gray-500">
-                            {assignedProfile.name}
-                          </span>
-                        </div>
-                      ) : (
-                        <span className="text-sm text-gray-500">
-                          {activeFilter}
-                        </span>
-                      )}
-                      <div className="relative inline-block ml-2">
-                        <button
-                          ref={assignButtonRef}
-                          onClick={() => setShowAssignMenu((v) => !v)}
-                          className="p-1 rounded hover:bg-gray-100"
-                        >
-                          <ChevronDown size={16} className="text-gray-500" />
-                        </button>
-                        {showAssignMenu && (
-                          <div
-                            ref={assignMenuRef}
-                            className="absolute left-0 top-full mt-1 w-48 bg-white border border-gray-200 rounded shadow-lg z-20 max-h-60 overflow-y-auto"
-                          >
-                            <button
-                              onClick={unassignCurrentContact}
-                              className="w-full text-left px-4 py-2 hover:bg-gray-100 flex items-center"
-                            >
-                              <XIcon className="w-6 h-6 mr-2" />
-                              <span className="text-sm">No Asignar</span>
-                            </button>
-                            {profiles
-                              .filter((p) => p.id !== selectedContact.assigned_to)
-                              .map((p) => (
-                                <button
-                                  key={p.id}
-                                  onClick={() => assignCurrentContactTo(p.id)}
-                                  className="w-full text-left px-4 py-2 hover:bg-gray-100 flex items-center"
-                                >
-                                  <img
-                                    src={p.avatar_url || "/avatar-placeholder.png"}
-                                    alt={p.name}
-                                    className="w-6 h-6 rounded-full mr-2 object-cover"
-                                  />
-                                  <span className="text-sm">{p.name}</span>
-                                </button>
-                              ))}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                    <hr className="border-t border-gray-200 mb-4" />
-
-                    <div className="flex items-center mb-4">
-                      <img
-                        src="/avatar-placeholder.png"
-                        alt={selectedContact.name}
-                        className="w-10 h-10 rounded-full mr-2 shadow-md"
-                      />
-                      <span className="text-xl font-bold text-gray-800">
-                        {selectedContact.name}
-                      </span>
-                    </div>
-                    <Conversation
-                      contactId={selectedContact.session_id}
-                      messageMode={messageMode}
-                      setMessageMode={setMessageMode}
-                    />
-                  </div>
+                  <Conversation
+                    contactId={selectedContact.session_id}
+                    messageMode={messageMode}
+                    setMessageMode={setMessageMode}
+                    currentUser={currentUser}
+                    selectedContact={selectedContact}
+                    profiles={profiles}
+                    activeFilter={activeFilter}
+                  />
                 </div>
                 <div className="w-px bg-gray-300 shadow-[0_0_10px_rgba(0,0,0,0.3)]" />
                 <aside className="w-1/4 bg-white shadow rounded p-4 flex flex-col overflow-y-auto">
@@ -1005,7 +978,61 @@ export default function ChatPage() {
                   <hr className="border-t border-gray-300 mb-4" />
 
                   {/* Etiquetas */}
-                  <p className="font-semibold mb-2">Etiquetas</p>
+                  <div className="mb-3 flex items-center justify-between">
+                    <p className="font-semibold">Etiquetas</p>
+                    <button
+                      onClick={() => setShowAddTagForm(true)}
+                      className="px-3 py-1 bg-blue-500 text-white text-sm rounded hover:bg-blue-600 transition-colors flex items-center gap-1"
+                    >
+                      <Plus size={14} />
+                      Añadir Etiqueta
+                    </button>
+                  </div>
+                  
+                  {/* Formulario para nueva etiqueta */}
+                  {showAddTagForm && (
+                    <div className="mb-3 p-3 bg-gray-50 rounded border">
+                      <input
+                        type="text"
+                        placeholder="Escribe tu Etiqueta..."
+                        value={newTagValue}
+                        onChange={(e) => setNewTagValue(e.target.value)}
+                        className="w-full px-3 py-2 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-gray-400 mb-3"
+                        autoFocus
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            addNewTag();
+                          } else if (e.key === "Escape") {
+                            setShowAddTagForm(false);
+                            setNewTagValue("");
+                          }
+                        }}
+                      />
+                      <div className="flex gap-3">
+                        <button
+                          onClick={addNewTag}
+                          disabled={!newTagValue.trim()}
+                          className={`flex-1 py-2 text-sm rounded font-medium ${
+                            newTagValue.trim()
+                              ? "bg-green-500 text-white hover:bg-green-600"
+                              : "bg-gray-300 text-gray-500 cursor-not-allowed"
+                          }`}
+                        >
+                          Guardar
+                        </button>
+                        <button
+                          onClick={() => {
+                            setShowAddTagForm(false);
+                            setNewTagValue("");
+                          }}
+                          className="flex-1 py-2 text-sm bg-red-500 text-white rounded font-medium hover:bg-red-600"
+                        >
+                          Cancelar
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  
                   <div className="flex flex-wrap gap-2">
                     {contactEtiquetas &&
                       Object.entries(contactEtiquetas).map(
@@ -1078,20 +1105,120 @@ export default function ChatPage() {
           </div>
         )}
 
-        {/* Toasts */}
+        {/* Professional Toasts */}
         {showDeletedToast && (
-          <div className="fixed bottom-4 left-4 bg-white border p-4 rounded shadow-lg animate-fadeIn">
-            Contacto Cerrado
+          <div className="fixed bottom-6 right-6 bg-white border border-red-200 rounded-lg shadow-xl p-4 max-w-sm animate-slideInUp z-50">
+            <div className="flex items-center">
+              <div className="flex-shrink-0">
+                <div className="w-10 h-10 bg-red-100 rounded-full flex items-center justify-center">
+                  <X className="w-5 h-5 text-red-600 animate-pulse" />
+                </div>
+              </div>
+              <div className="ml-3 flex-1">
+                <div className="text-sm font-medium text-gray-900">
+                  Contacto Cerrado
+                </div>
+                <div className="text-xs text-gray-500 mt-1">
+                  La conversación ha sido marcada como cerrada exitosamente
+                </div>
+              </div>
+              <button
+                onClick={() => setShowDeletedToast(false)}
+                className="ml-3 flex-shrink-0 text-gray-400 hover:text-gray-600 transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="w-full bg-red-200 h-1 rounded-full mt-3 overflow-hidden">
+              <div className="bg-red-500 h-full rounded-full animate-progressBar"></div>
+            </div>
           </div>
         )}
+        
         {showAssignedToast && (
-          <div className="fixed bottom-4 left-4 bg-white border p-4 rounded shadow-lg animate-fadeIn">
-            Contacto Asignado a {assignedToName}
+          <div className="fixed bottom-6 right-6 bg-white border border-blue-200 rounded-lg shadow-xl p-4 max-w-sm animate-slideInUp z-50">
+            <div className="flex items-center">
+              <div className="flex-shrink-0">
+                <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
+                  <UserPlus className="w-5 h-5 text-blue-600 animate-bounce" />
+                </div>
+              </div>
+              <div className="ml-3 flex-1">
+                <div className="text-sm font-medium text-gray-900">
+                  Contacto Asignado
+                </div>
+                <div className="text-xs text-gray-500 mt-1">
+                  Asignado exitosamente a {assignedToName}
+                </div>
+              </div>
+              <button
+                onClick={() => setShowAssignedToast(false)}
+                className="ml-3 flex-shrink-0 text-gray-400 hover:text-gray-600 transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="w-full bg-blue-200 h-1 rounded-full mt-3 overflow-hidden">
+              <div className="bg-blue-500 h-full rounded-full animate-progressBar"></div>
+            </div>
           </div>
         )}
+        
         {showReopenedToast && (
-          <div className="fixed bottom-4 left-4 bg-white border p-4 rounded shadow-lg animate-fadeIn">
-            Conversación Reabierta
+          <div className="fixed bottom-6 right-6 bg-white border border-green-200 rounded-lg shadow-xl p-4 max-w-sm animate-slideInUp z-50">
+            <div className="flex items-center">
+              <div className="flex-shrink-0">
+                <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center">
+                  <FolderOpen className="w-5 h-5 text-green-600 animate-pulse" />
+                </div>
+              </div>
+              <div className="ml-3 flex-1">
+                <div className="text-sm font-medium text-gray-900">
+                  Conversación Reabierta
+                </div>
+                <div className="text-xs text-gray-500 mt-1">
+                  La conversación está nuevamente activa y disponible
+                </div>
+              </div>
+              <button
+                onClick={() => setShowReopenedToast(false)}
+                className="ml-3 flex-shrink-0 text-gray-400 hover:text-gray-600 transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="w-full bg-green-200 h-1 rounded-full mt-3 overflow-hidden">
+              <div className="bg-green-500 h-full rounded-full animate-progressBar"></div>
+            </div>
+          </div>
+        )}
+        
+        {showTagAddedToast && (
+          <div className="fixed bottom-6 right-6 bg-white border border-emerald-200 rounded-lg shadow-xl p-4 max-w-sm animate-slideInUp z-50">
+            <div className="flex items-center">
+              <div className="flex-shrink-0">
+                <div className="w-10 h-10 bg-emerald-100 rounded-full flex items-center justify-center">
+                  <CheckCircle className="w-5 h-5 text-emerald-600 animate-bounce" />
+                </div>
+              </div>
+              <div className="ml-3 flex-1">
+                <div className="text-sm font-medium text-gray-900">
+                  Etiqueta Añadida
+                </div>
+                <div className="text-xs text-gray-500 mt-1">
+                  La nueva etiqueta se ha guardado correctamente
+                </div>
+              </div>
+              <button
+                onClick={() => setShowTagAddedToast(false)}
+                className="ml-3 flex-shrink-0 text-gray-400 hover:text-gray-600 transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="w-full bg-emerald-200 h-1 rounded-full mt-3 overflow-hidden">
+              <div className="bg-emerald-500 h-full rounded-full animate-progressBar"></div>
+            </div>
           </div>
         )}
       </div>

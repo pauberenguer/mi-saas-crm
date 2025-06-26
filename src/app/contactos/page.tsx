@@ -46,14 +46,19 @@ export default function ContactosPage() {
     setEditedName("");
   }, [selectedProfile]);
 
-  // Conteo de etiquetas
+  // Conteo de etiquetas filtradas
   const tagCounts: Record<string, number> = {};
+  const allowedTagKeys = ['Raza', 'Sexo', 'Color'];
+  
   contacts.forEach(c => {
     if (c.etiquetas) {
-      Object.values(c.etiquetas).forEach(v => {
-        const t = v.trim();
-        if (t) {
-          tagCounts[t] = (tagCounts[t] || 0) + 1;
+      Object.entries(c.etiquetas).forEach(([key, value]) => {
+        const tagValue = value.trim();
+        if (tagValue) {
+          // Solo incluir etiquetas específicas o Custom
+          if (allowedTagKeys.includes(key) || key.startsWith('Custom')) {
+            tagCounts[tagValue] = (tagCounts[tagValue] || 0) + 1;
+          }
         }
       });
     }
@@ -65,7 +70,7 @@ export default function ContactosPage() {
     supabase
       .from("contactos")
       .select("*")
-      .order("name", { ascending: true })
+      .order("created_at", { ascending: false })
       .then(({ data, error }) => {
         if (error) console.error(error);
         else setContacts(data || []);
@@ -215,35 +220,39 @@ export default function ContactosPage() {
 
         <div className="flex gap-8">
           {/* Panel de etiquetas */}
-          <div className="w-48 p-4 bg-white rounded shadow-md hover:scale-105 transition animate-fadeIn">
-            <div className="flex items-center justify-between mb-2">
-              <h2 className="text-lg font-bold text-gray-800">Etiquetas</h2>
-              <span className="text-sm font-medium text-[#1d1d1d]">Contactos</span>
+          <div className="w-48 animate-fadeIn">
+                         <div className="p-4 bg-white rounded shadow-md transition flex flex-col h-[calc(100vh-200px)]" style={{ marginTop: '48px' }}>
+              <div className="flex items-center justify-between mb-2 flex-shrink-0">
+                <h2 className="text-lg font-bold text-gray-800">Etiquetas</h2>
+                <span className="text-sm font-medium text-[#1d1d1d]">Contactos</span>
+              </div>
+              <div className="flex-1 overflow-y-auto min-h-0">
+                <ul className="space-y-1">
+                  {allTags.length ? (
+                    allTags.map(tag => {
+                      const active = selectedTag === tag;
+                      return (
+                        <li key={tag} className="flex justify-between">
+                          <button
+                            onClick={() => setSelectedTag(tag)}
+                            className={`text-sm ${
+                              active ? "font-bold text-blue-600" : "text-gray-700"
+                            }`}
+                          >
+                            {tag}
+                          </button>
+                          <span className={active ? "text-blue-600" : "text-gray-600"}>
+                            {tagCounts[tag]}
+                          </span>
+                        </li>
+                      );
+                    })
+                  ) : (
+                    <li className="text-sm text-gray-500">No hay etiquetas</li>
+                  )}
+                </ul>
+              </div>
             </div>
-            <ul className="space-y-1">
-              {allTags.length ? (
-                allTags.map(tag => {
-                  const active = selectedTag === tag;
-                  return (
-                    <li key={tag} className="flex justify-between">
-                      <button
-                        onClick={() => setSelectedTag(tag)}
-                        className={`text-sm ${
-                          active ? "font-bold text-blue-600" : "text-gray-700"
-                        }`}
-                      >
-                        {tag}
-                      </button>
-                      <span className={active ? "text-blue-600" : "text-gray-600"}>
-                        {tagCounts[tag]}
-                      </span>
-                    </li>
-                  );
-                })
-              ) : (
-                <li className="text-sm text-gray-500">No hay etiquetas</li>
-              )}
-            </ul>
           </div>
 
           {/* Área de contactos */}
@@ -326,60 +335,62 @@ export default function ContactosPage() {
             </div>
 
             {/* Tabla */}
-            <div className="overflow-x-auto bg-white p-4 rounded shadow transition animate-fadeIn">
-              <table className="min-w-full border-collapse">
-                <thead>
-                  <tr className="bg-blue-50">
-                    <th className="px-1 py-1 text-center">
-                      <input
-                        type="checkbox"
-                        onChange={toggleSelectAll}
-                        checked={
-                          filteredContacts.length > 0 &&
-                          selectedContacts.size === filteredContacts.length
-                        }
-                        className="h-5 w-5 rounded border border-gray-300 checked:bg-gradient-to-br checked:from-blue-500 checked:to-blue-700 transition"
-                      />
-                    </th>
-                    <th className="px-1 py-1 text-center">Avatar</th>
-                    <th className="px-1 py-1 text-center">Nombre</th>
-                    <th className="px-1 py-1 text-center">Teléfono</th>
-                    <th className="px-1 py-1 text-center">Suscrito</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-200">
-                  {filteredContacts.map(contact => (
-                    <tr
-                      key={contact.session_id}
-                      onClick={e => handleRowClick(contact, e)}
-                      className="cursor-pointer hover:bg-blue-100 transition"
-                    >
-                      <td className="px-1 py-1 text-center">
+            <div className="bg-white p-4 rounded shadow transition animate-fadeIn flex flex-col h-[calc(100vh-200px)]">
+              <div className="flex-1 overflow-auto min-h-0">
+                <table className="min-w-full border-collapse">
+                  <thead className="sticky top-0 bg-white z-10">
+                    <tr className="bg-blue-50">
+                      <th className="px-1 py-1 text-center">
                         <input
                           type="checkbox"
-                          checked={selectedContacts.has(contact.session_id)}
-                          onChange={() => toggleSelectContact(contact.session_id)}
+                          onChange={toggleSelectAll}
+                          checked={
+                            filteredContacts.length > 0 &&
+                            selectedContacts.size === filteredContacts.length
+                          }
                           className="h-5 w-5 rounded border border-gray-300 checked:bg-gradient-to-br checked:from-blue-500 checked:to-blue-700 transition"
                         />
-                      </td>
-                      <td className="px-1 py-1 text-center">
-                        <img
-                          src="/avatar-placeholder.png"
-                          alt={contact.name}
-                          className="w-10 h-10 rounded-full object-cover mx-auto"
-                        />
-                      </td>
-                      <td className="px-1 py-1 text-center">{contact.name}</td>
-                      <td className="px-1 py-1 text-center">
-                        {contact.session_id}
-                      </td>
-                      <td className="px-1 py-1 text-center">
-                        {new Date(contact.created_at).toLocaleDateString()}
-                      </td>
+                      </th>
+                      <th className="px-1 py-1 text-center">Avatar</th>
+                      <th className="px-1 py-1 text-center">Nombre</th>
+                      <th className="px-1 py-1 text-center">Teléfono</th>
+                      <th className="px-1 py-1 text-center">Suscrito</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200">
+                    {filteredContacts.map(contact => (
+                      <tr
+                        key={contact.session_id}
+                        onClick={e => handleRowClick(contact, e)}
+                        className="cursor-pointer hover:bg-blue-100 transition"
+                      >
+                        <td className="px-1 py-1 text-center">
+                          <input
+                            type="checkbox"
+                            checked={selectedContacts.has(contact.session_id)}
+                            onChange={() => toggleSelectContact(contact.session_id)}
+                            className="h-5 w-5 rounded border border-gray-300 checked:bg-gradient-to-br checked:from-blue-500 checked:to-blue-700 transition"
+                          />
+                        </td>
+                        <td className="px-1 py-1 text-center">
+                          <img
+                            src="/avatar-placeholder.png"
+                            alt={contact.name}
+                            className="w-10 h-10 rounded-full object-cover mx-auto"
+                          />
+                        </td>
+                        <td className="px-1 py-1 text-center">{contact.name}</td>
+                        <td className="px-1 py-1 text-center">
+                          {contact.session_id}
+                        </td>
+                        <td className="px-1 py-1 text-center">
+                          {new Date(contact.created_at).toLocaleDateString()}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
         </div>

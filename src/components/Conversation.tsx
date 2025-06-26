@@ -30,6 +30,7 @@ import {
   Pause,
   Play,
   Video,
+  MessageSquare,
 } from "lucide-react";
 import { MessageContent, MessageType, MessageOrigin } from "../types/database";
 
@@ -40,6 +41,10 @@ interface ConversationProps {
   contactId: string;
   messageMode: "Responder" | "Nota";
   setMessageMode: (m: "Responder" | "Nota") => void;
+  currentUser?: { id: string; name: string; avatar_url?: string } | null;
+  selectedContact?: { name: string; assigned_to?: string | null };
+  profiles?: { id: string; name: string; avatar_url?: string }[];
+  activeFilter?: string;
 }
 
 type TemplateItem = { name: string; category: string; language: string };
@@ -129,6 +134,10 @@ export default function Conversation({
   contactId,
   messageMode,
   setMessageMode,
+  currentUser,
+  selectedContact,
+  profiles = [],
+  activeFilter,
 }: ConversationProps) {
   const router = useRouter();
 
@@ -146,6 +155,9 @@ export default function Conversation({
   const [tplMenuOpen, setTplMenuOpen] = useState(false);
   const [templatesList, setTemplatesList] = useState<TemplateItem[]>([]);
   const [selectedTpl, setSelectedTpl] = useState<TemplateFull | null>(null);
+
+  const [quickReplyMenuOpen, setQuickReplyMenuOpen] = useState(false);
+  const [quickRepliesList, setQuickRepliesList] = useState<string[]>([]);
 
   const [selectedImages, setSelectedImages] = useState<File[]>([]);
   const [imagePreviews, setImagePreviews] = useState<string[]>([]);
@@ -167,6 +179,7 @@ export default function Conversation({
   const intervalRef = useRef<number | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
+  const quickReplyMenuRef = useRef<HTMLDivElement | null>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const docInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
@@ -194,6 +207,22 @@ export default function Conversation({
           selectedDocs.length > 0);
 
   const messageOrigin = messageMode === "Nota" ? "note" : "crm";
+
+  /* ------------------------------------------------------------------- */
+  /* Auto-asignar contacto al usuario actual cuando envía mensaje       */
+  /* ------------------------------------------------------------------- */
+  const autoAssignContact = async () => {
+    if (!currentUser || messageMode === "Nota") return;
+    
+    try {
+      await supabase
+        .from("contactos")
+        .update({ assigned_to: currentUser.id })
+        .eq("session_id", contactId);
+    } catch (error) {
+      console.error("Error auto-asignando contacto:", error);
+    }
+  };
 
   /* ------------------------------------------------------------------- */
   /* 1) Avatar y plantillas                                              */
@@ -456,11 +485,69 @@ export default function Conversation({
       setTplMenuOpen(false);
     }
   };
+
+  const handleSelectQuickReply = (reply: string) => {
+    setNewMessage(reply);
+    setQuickReplyMenuOpen(false);
+  };
+
+  // Cargar respuestas rápidas desde la base de datos
+  useEffect(() => {
+    const fetchQuickReplies = async () => {
+      const { data, error } = await supabase
+        .from("respuestas_rapidas")
+        .select("content")
+        .order("created_at", { ascending: false });
+      
+      if (!error && data) {
+        const replies = data.map(item => item.content);
+        setQuickRepliesList(replies);
+      } else {
+        // Fallback a respuestas predefinidas si no hay en la BD
+        const defaultReplies = [
+          "¡Hola! ¿En qué puedo ayudarte?",
+          "Gracias por contactarnos",
+          "Perfecto, te ayudo con eso",
+          "¿Podrías darme más detalles?",
+          "Te envío la información en un momento"
+        ];
+        setQuickRepliesList(defaultReplies);
+      }
+    };
+
+    fetchQuickReplies();
+
+    // Suscribirse a cambios en tiempo real en respuestas rápidas
+    const quickRepliesChannel = supabase
+      .channel("respuestas_rapidas_changes")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "respuestas_rapidas" },
+        () => {
+          // Recargar respuestas rápidas cuando hay cambios
+          fetchQuickReplies();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(quickRepliesChannel);
+    };
+  }, []);
   useEffect(() => {
     const close = (e: MouseEvent) =>
       menuRef.current &&
       !menuRef.current.contains(e.target as Node) &&
       setTplMenuOpen(false);
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, []);
+
+  useEffect(() => {
+    const close = (e: MouseEvent) =>
+      quickReplyMenuRef.current &&
+      !quickReplyMenuRef.current.contains(e.target as Node) &&
+      setQuickReplyMenuOpen(false);
     document.addEventListener("mousedown", close);
     return () => document.removeEventListener("mousedown", close);
   }, []);
@@ -651,6 +738,10 @@ export default function Conversation({
       if (!success) {
         return;
       }
+      
+      // Auto-asignar contacto al usuario actual
+      await autoAssignContact();
+      
       await fetch("https://n8n.asisttente.com/webhook/elgloboenviarplantilla", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -688,6 +779,9 @@ export default function Conversation({
         if (!success) {
           continue;
         }
+
+        // Auto-asignar contacto al usuario actual
+        await autoAssignContact();
 
         if (messageMode === "Responder" && !isLocked) {
           await fetch("https://n8n.asisttente.com/webhook/elglobobot", {
@@ -744,6 +838,9 @@ export default function Conversation({
           },
         ]);
 
+        // Auto-asignar contacto al usuario actual
+        await autoAssignContact();
+
         if (messageMode === "Responder" && !isLocked) {
           await fetch("https://n8n.asisttente.com/webhook/elglobobot", {
             method: "POST",
@@ -788,6 +885,9 @@ export default function Conversation({
           },
         ]);
 
+        // Auto-asignar contacto al usuario actual
+        await autoAssignContact();
+
         if (messageMode === "Responder" && !isLocked) {
           await fetch("https://n8n.asisttente.com/webhook/elglobobot", {
             method: "POST",
@@ -825,6 +925,9 @@ export default function Conversation({
     if (!success) {
       return;
     }
+
+    // Auto-asignar contacto al usuario actual
+    await autoAssignContact();
 
     if (messageMode === "Responder" && !isLocked && !selectedTpl) {
       await fetch("https://n8n.asisttente.com/webhook/elglobobot", {
@@ -866,7 +969,7 @@ export default function Conversation({
   /* 13) RENDER                                                           */
   /* ------------------------------------------------------------------- */
   return (
-    <div className="flex flex-col h-full" ref={menuRef}>
+    <div className="flex flex-col h-full bg-white rounded shadow p-4" ref={menuRef}>
       {/* inputs ocultos */}
       <input
         ref={docInputRef}
@@ -893,8 +996,31 @@ export default function Conversation({
         onChange={handleVideoChange}
       />
 
+      {/* Header dinámico con avatar y nombre del contacto */}
+      {selectedContact && (
+        <>
+          <div className="mb-2 flex items-center">
+            <span className="text-sm text-gray-500">
+              {activeFilter}
+            </span>
+          </div>
+          <hr className="border-t border-gray-200 mb-4" />
+
+          <div className="flex items-center mb-4">
+            <img
+              src="/avatar-placeholder.png"
+              alt={selectedContact.name}
+              className="w-10 h-10 rounded-full mr-2 shadow-md"
+            />
+            <span className="text-xl font-bold text-gray-800">
+              {selectedContact.name}
+            </span>
+          </div>
+        </>
+      )}
+
       {/* conversación */}
-      <div className="h-[568px] overflow-y-auto p-4 mb-2">
+      <div className="flex-1 overflow-y-auto mb-2 min-h-0">
         {groupConsecutiveAIImages(filteredMessages).map((row) => {
           // Si es un grupo de imágenes, renderizar de manera especial
           if ('isImageGroup' in row && row.isImageGroup) {
@@ -1181,14 +1307,50 @@ export default function Conversation({
       {/* input y controles */}
       <div className="mt-2 flex items-center space-x-4 relative">
         {messageMode !== "Nota" && (
+          <button className="p-1" onClick={() => setQuickReplyMenuOpen((o) => !o)}>
+            <MessageSquare size={20} color="#818b9c" />
+          </button>
+        )}
+
+        {messageMode !== "Nota" && (
           <button className="p-1" onClick={() => setTplMenuOpen((o) => !o)}>
             <FileText size={20} color="#818b9c" />
           </button>
         )}
 
+        {messageMode !== "Nota" && quickReplyMenuOpen && (
+          <div
+            className="absolute bottom-full left-0 mb-2 w-80 max-h-60 overflow-y-auto bg-white divide-y divide-gray-100 rounded-lg shadow-lg z-10"
+            ref={quickReplyMenuRef}
+          >
+            {quickRepliesList.length === 0 ? (
+              <div className="p-4 text-sm text-gray-500">No hay respuestas rápidas.</div>
+            ) : (
+              quickRepliesList.map((reply, index) => (
+                <button
+                  key={index}
+                  className="w-full text-left px-4 py-3 hover:bg-gray-50 border-b border-gray-100 last:border-b-0"
+                  onClick={() => handleSelectQuickReply(reply)}
+                >
+                  <div className="text-sm text-gray-800">{reply}</div>
+                </button>
+              ))
+            )}
+            <button
+              className="w-full px-4 py-2 text-center text-sm text-blue-600 hover:bg-gray-50"
+              onClick={() => {
+                setQuickReplyMenuOpen(false);
+                router.push("/configuracion/respuestas-rapidas");
+              }}
+            >
+              Ver Respuestas Rápidas
+            </button>
+          </div>
+        )}
+
         {messageMode !== "Nota" && tplMenuOpen && (
           <div
-            className="absolute bottom-full left-0 mb-2 w-64 max-h-60 overflow-y-auto bg-white divide-y divide-gray-100 rounded-lg shadow-lg z-10"
+            className="absolute bottom-full left-12 mb-2 w-64 max-h-60 overflow-y-auto bg-white divide-y divide-gray-100 rounded-lg shadow-lg z-10"
             ref={menuRef}
           >
             {templatesList.length === 0 ? (

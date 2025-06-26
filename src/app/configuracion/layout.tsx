@@ -15,23 +15,7 @@ export default function ConfiguracionLayout({
   const hideSidebar = pathname === "/configuracion/whatsapp/crear_plantilla";
 
   return (
-    <>
-      <style jsx>{`
-        @keyframes fadeIn {
-          from {
-            opacity: 0;
-            transform: translateY(10px);
-          }
-          to {
-            opacity: 1;
-            transform: translateY(0);
-          }
-        }
-        .animate-fadeIn {
-          animation: fadeIn 0.5s ease-in-out forwards;
-        }
-      `}</style>
-      <div className="min-h-screen bg-gray-50 p-8">
+    <div className="min-h-screen bg-gray-50 p-8">
         <header className="animate-fadeIn mb-2">
           <h1 className="text-3xl font-bold" style={{ color: "#1d1d1d" }}>
             Configuración
@@ -78,6 +62,16 @@ export default function ConfiguracionLayout({
                 >
                   Whatsapp
                 </Link>
+                <Link
+                  href="/configuracion/respuestas-rapidas"
+                  className={
+                    pathname.startsWith("/configuracion/respuestas-rapidas")
+                      ? `${baseLink} bg-gray-200 text-gray-900`
+                      : `${baseLink} text-gray-700 hover:bg-gray-100`
+                  }
+                >
+                  Respuestas Rápidas
+                </Link>
                 <span className="block px-2 py-1 text-base font-medium text-gray-900">
                   Sonido
                 </span>
@@ -99,6 +93,5 @@ export default function ConfiguracionLayout({
           </main>
         </div>
       </div>
-    </>
   );
 }
