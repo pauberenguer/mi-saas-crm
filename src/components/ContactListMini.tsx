@@ -31,7 +31,7 @@ export interface Contact {
   created_at: string;
   is_paused?: boolean;
   last_viewed_at: string;
-  last_customer_message: string;
+  last_customer_message: string | null;
   estado?: "Abierto" | "Cerrado";
   etiquetas?: Record<string, string>;
   assigned_to?: string | null;
@@ -127,17 +127,18 @@ export default function ContactListMini({
                               : `${Math.floor(sec/86400)} d`;
 
   /* ────────────── Multimedia ────────────── */
-  const detectMediaType = (msg: string): MediaType => {
-    if (!msg) return null;
+  const detectMediaType = (msg: string | null | undefined): MediaType => {
+    if (!msg || typeof msg !== 'string') return null;
+    let messageContent = msg;
     try {
-      const obj = JSON.parse(msg);
+      const obj = JSON.parse(messageContent);
       if (obj?.etiquetas?.imagen) return "image";
       if (obj?.etiquetas?.audio)  return "audio";
       if (obj?.etiquetas?.video)  return "video";
-      if (typeof obj?.content === "string") msg = obj.content;
+      if (typeof obj?.content === "string") messageContent = obj.content;
     } catch {}
-    const urlMatch = /(https?:\/\/[^\s]+)/.exec(msg);
-    const u = urlMatch ? urlMatch[1] : msg;
+    const urlMatch = /(https?:\/\/[^\s]+)/.exec(messageContent);
+    const u = urlMatch ? urlMatch[1] : messageContent;
     if (/\.(jpe?g|png|gif|webp)$/i.test(u))  return "image";
     if (/\.(ogg|mp3|wav)$/i.test(u))         return "audio";
     if (/\.(mp4|mov|webm)$/i.test(u))        return "video";
@@ -145,10 +146,14 @@ export default function ContactListMini({
   };
   const iconFor = (t: MediaType) =>
     t==="image"? "Foto 📷" : t==="audio"? "Audio 🎵" : t==="video"? "Video 🎥" : "";
-  const truncate = (str: string, max=28)=> str.length>max? str.slice(0,max)+"..." : str;
+  const truncate = (str: string | null | undefined, max=28)=> {
+    if (!str) return "Sin mensaje";
+    return str.length>max? str.slice(0,max)+"..." : str;
+  };
   const truncateName = (name: string) => name.length > 10 ? name.slice(0, 10) + "..." : name;
 
-  const getPreview = (msg: string, sid: string): string => {
+  const getPreview = (msg: string | null | undefined, sid: string): string => {
+    if (!msg) return "Sin mensaje";
     const detected = detectMediaType(msg);
     if (detected) return iconFor(detected);
     const remembered = lastMediaType[sid] || null;
