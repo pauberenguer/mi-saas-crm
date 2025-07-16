@@ -262,24 +262,9 @@ export default function Conversation({
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const out: any[] = [];
-    let skipNext = false;
     for (const row of data) {
       try {
-        const m =
-          typeof row.message === "string" ? JSON.parse(row.message) : row.message;
-        if (
-          skipNext &&
-          m.type === "human" &&
-          !m.etiquetas?.imagen &&
-          !m.etiquetas?.audio &&
-          !m.etiquetas?.fotos
-        ) {
-          skipNext = false;
-          continue;
-        }
         out.push(row);
-        if (m.etiquetas?.imagen || m.etiquetas?.audio || m.etiquetas?.fotos)
-          skipNext = true;
       } catch {
         out.push(row);
       }
@@ -321,30 +306,6 @@ export default function Conversation({
         },
         ({ new: row }) => {
           try {
-            const m =
-              typeof row.message === "string"
-                ? JSON.parse(row.message)
-                : row.message;
-            if (m.etiquetas?.imagen || m.etiquetas?.audio || m.etiquetas?.fotos) {
-              setMessages((p) => [...p, row]);
-              return;
-            }
-            const ant = messages[messages.length - 1];
-            const mAnt =
-              ant && typeof ant.message === "string"
-                ? JSON.parse(ant.message)
-                : ant?.message;
-            if (
-              mAnt &&
-              (mAnt.etiquetas?.imagen ||
-                mAnt.etiquetas?.audio ||
-                mAnt.etiquetas?.fotos) &&
-              m.type === "human" &&
-              !m.etiquetas?.imagen &&
-              !m.etiquetas?.audio &&
-              !m.etiquetas?.fotos
-            )
-              return;
             setMessages((p) => [...p, row]);
           } catch {
             setMessages((p) => [...p, row]);
